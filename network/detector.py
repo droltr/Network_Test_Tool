@@ -23,10 +23,8 @@ class NetworkDetector:
         try:
             info = {
                 'hostname': self.get_hostname(),
-                'ip_address': self.get_local_ip(),
                 'gateway': self.get_default_gateway(),
                 'dns': self.get_dns_servers(),
-                'mac_address': self.get_mac_address(),
                 'connections': self.get_connection_status(),
                 'interfaces': self.get_network_interfaces(),
                 'timestamp': datetime.now().isoformat()
@@ -42,10 +40,15 @@ class NetworkDetector:
     def get_local_ip(self) -> list[str]:
         """Get all local IP addresses (IPv4) for active interfaces."""
         ip_addresses = []
-        for interface, addrs in psutil.net_if_addrs().items():
-            for addr in addrs:
-                if addr.family == socket.AF_INET and not addr.address.startswith('127.'): # Exclude loopback
-                    ip_addresses.append(addr.address)
+        try:
+            for interface, addrs in psutil.net_if_addrs().items():
+                for addr in addrs:
+                    if addr.family == socket.AF_INET and not addr.address.startswith('127.'): # Exclude loopback
+                        ip_addresses.append(addr.address)
+            print(f"DEBUG: get_local_ip - Detected IPs: {ip_addresses}")
+        except Exception as e:
+            print(f"DEBUG: get_local_ip - Error: {e}")
+            pass
         return ip_addresses if ip_addresses else ["Unable to determine"]
     
     def get_default_gateway(self) -> list[str]:
@@ -58,8 +61,9 @@ class NetworkDetector:
                     if gw_family in gws and gws[gw_family]:
                         for gw_info in gws[gw_family]:
                             gateways.append(gw_info[0])
-            except Exception:
-                pass
+                print(f"DEBUG: get_default_gateway - Detected Gateways (netifaces): {gateways}")
+            except Exception as e:
+                print(f"DEBUG: get_default_gateway - Error (netifaces): {e}")
         
         if not gateways and self.platform == "windows":
             try:
@@ -72,8 +76,9 @@ class NetworkDetector:
                             gateway = parts[1].strip()
                             if gateway and gateway != '0.0.0.0':
                                 gateways.append(gateway)
-            except Exception:
-                pass
+                print(f"DEBUG: get_default_gateway - Detected Gateways (ipconfig): {gateways}")
+            except Exception as e:
+                print(f"DEBUG: get_default_gateway - Error (ipconfig): {e}")
         return gateways if gateways else ["Unable to determine"]
     
     def get_dns_servers(self) -> list[str]:
@@ -98,7 +103,9 @@ class NetworkDetector:
                             ip = line.split()[1].strip()
                             if ip not in dns_servers:
                                 dns_servers.append(ip)
-        except Exception:
+            print(f"DEBUG: get_dns_servers - Detected DNS: {dns_servers}")
+        except Exception as e:
+            print(f"DEBUG: get_dns_servers - Error: {e}")
             pass
         return dns_servers if dns_servers else ["Unable to determine"]
     
@@ -153,30 +160,43 @@ class NetworkDetector:
                     if addr.family == socket.AF_INET:
                         interface_info['ipv4'] = addr.address
                     elif addr.family == psutil.AF_LINK:
-                        interface_info['mac'] = addr.address
+                        interface_info['mac'] = addr.address.lower() # Convert MAC to lowercase
                 
                 interfaces.append(interface_info)
+            print(f"DEBUG: get_network_interfaces - Detected Interfaces: {interfaces}")
             return interfaces
-        except:
+        except Exception as e:
+            print(f"DEBUG: get_network_interfaces - Error: {e}")
             return []
 
     def check_internet_connection(self):
-        """Test internet connectivity"""
+        """Test internet connectivity by trying to reach Google's DNS server and a well-known website."""
         try:
-            socket.create_connection(("8.8.8.8", 53), timeout=3)
+            # Try to connect to Google's public DNS server
+            socket.create_connection(("8.8.8.8", 53), timeout=2)
+            
+            # Try to fetch a small page from a reliable website
+            import urllib.request
+            urllib.request.urlopen("http://www.google.com", timeout=2)
             return True
         except:
             return False
     
     def test_local_network(self):
-        """Test local network connectivity"""
+        """Test local network connectivity by trying to reach the default gateway(s)."""
         gateways = self.get_default_gateway()
         for gateway in gateways:
             if gateway != "Unable to determine":
                 try:
-                    socket.create_connection((gateway, 80), timeout=3)
-                    return True
-                except:
+                    # Try to ping the gateway
+                    if platform.system().lower() == 'windows':
+                        cmd = ['ping', '-n', '1', gateway]
+                    else:
+                        cmd = ['ping', '-c', '1', gateway]
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=3, encoding='cp850')
+                    if result.returncode == 0:
+                        return True
+                except Exception:
                     pass
         return False
     

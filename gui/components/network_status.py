@@ -22,6 +22,7 @@ class NetworkStatusWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.detector = NetworkDetector()
+        self.current_thread = None  # To keep track of the running thread
         self.setup_ui()
         self.setup_timer()
         self.refresh_info()
@@ -31,19 +32,39 @@ class NetworkStatusWidget(QWidget):
         self.ui_update_timer.timeout.connect(self.process_update_queue)
         self.ui_update_timer.start()
 
+    def closeEvent(self, event):
+        # Ensure thread is terminated when widget is closed
+        if self.current_thread and self.current_thread.isRunning():
+            self.current_thread.quit()
+            self.current_thread.wait()
+        super().closeEvent(event)
+
     def process_update_queue(self):
         if self.update_queue:
             info = self.update_queue.pop(0)
             self.hostname_label.setText(info.get('hostname', 'Unknown'))
-            self.ip_label.setText(", ".join(info.get('ip_address', ['Unknown'])) if info.get('ip_address') else 'Unknown')
+
+            # Update IP addresses and MAC addresses per interface
+            ip_mac_text = []
+            mac_text = []
+            for interface in info.get('interfaces', []):
+                name = interface.get('name', 'Unknown')
+                ipv4 = interface.get('ipv4', 'N/A')
+                mac = interface.get('mac', 'N/A')
+                ip_mac_text.append(f"<b>{name}</b><br>  IP: {ipv4}")
+                mac_text.append(f"<b>{name}</b><br>  MAC: {mac}")
+            self.ip_label.setText("<br><br>".join(ip_mac_text) if ip_mac_text else 'Unknown')
+            self.mac_label.setText("<br>".join(mac_text) if mac_text else 'Unknown')
+
             self.gateway_label.setText(", ".join(info.get('gateway', ['Unknown'])))
-            self.dns_label.setText(", ".join(info.get('dns', ['Unknown'])))
+            self.dns_label.setText("<br>".join(info.get('dns', ['Unknown'])))
             
             # Update connection list
             self.connection_list.clear()
             connections = info.get('connections', [])
             for conn in connections:
-                item = QListWidgetItem(f"{conn['description']}: {conn['status']}")
+                item = QListWidgetItem()
+                item.setText(f"{conn['description']}: {conn['status']}")
                 from PyQt5.QtGui import QColor, QBrush
                 if conn['status'] == 'Connected' or conn['status'] == 'Working':
                     item.setForeground(QBrush(QColor("#A3BE8C")))  # Green
@@ -114,12 +135,21 @@ class NetworkStatusWidget(QWidget):
     def setup_timer(self):
         self.timer = QTimer()
         self.timer.timeout.connect(self.refresh_info)
-        self.auto_refresh = False
+        self.auto_refresh = True
+        self.toggle_auto_refresh()
         
     def refresh_info(self):
-        self.thread = NetworkInfoThread(self)
-        self.thread.info_ready.connect(self.update_info)
-        self.thread.start()
+        if self.current_thread and self.current_thread.isRunning():
+            self.current_thread.quit()
+            self.current_thread.wait() # Wait for the thread to finish
+
+        self.current_thread = NetworkInfoThread(self)
+        self.current_thread.info_ready.connect(self.update_info)
+        self.current_thread.finished.connect(self.thread_finished) # Connect finished signal
+        self.current_thread.start()
+
+    def thread_finished(self):
+        self.current_thread = None # Clear the reference when the thread finishes
         
     def update_info(self, info):
         self.update_queue.append(info)
