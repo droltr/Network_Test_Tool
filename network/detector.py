@@ -149,25 +149,60 @@ class NetworkDetector:
         return connections
     
     def get_network_interfaces(self):
-        """Get all network interfaces"""
+        """Get all network interfaces with their status."""
         interfaces = []
         try:
+            # Get basic interface info with psutil
             net_interfaces = psutil.net_if_addrs()
             for interface_name, addrs in net_interfaces.items():
-                interface_info = {'name': interface_name}
-                
+                interface_info = {'name': interface_name, 'status': 'Unknown'}
                 for addr in addrs:
                     if addr.family == socket.AF_INET:
                         interface_info['ipv4'] = addr.address
                     elif addr.family == psutil.AF_LINK:
-                        interface_info['mac'] = addr.address.lower() # Convert MAC to lowercase
-                
+                        interface_info['mac'] = addr.address.lower()
                 interfaces.append(interface_info)
+
+            # On Windows, use netsh to get admin state
+            if self.platform == "windows":
+                try:
+                    result = subprocess.run(['netsh', 'interface', 'show', 'interface'], capture_output=True, text=True, check=True)
+                    lines = result.stdout.strip().split('\n')
+                    for line in lines[3:]: # Skip header lines
+                        parts = line.split()
+                        if len(parts) >= 4:
+                            status = parts[0]
+                            name = " ".join(parts[3:])
+                            for iface in interfaces:
+                                if iface['name'] == name:
+                                    iface['status'] = status
+                                    break
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    pass # netsh might not be available or fail
+
             print(f"DEBUG: get_network_interfaces - Detected Interfaces: {interfaces}")
             return interfaces
         except Exception as e:
             print(f"DEBUG: get_network_interfaces - Error: {e}")
             return []
+
+    def set_adapter_state(self, adapter_name, state):
+        """Enable or disable a network adapter on Windows."""
+        if self.platform != "windows":
+            return False, "This function is only available on Windows."
+        
+        action = "enable" if state else "disable"
+        try:
+            command = ['netsh', 'interface', 'set', 'interface', f'name="{adapter_name}"', f'admin={action}']
+            result = subprocess.run(command, capture_output=True, text=True, check=True, shell=True)
+            if result.returncode == 0:
+                return True, f"Adapter '{adapter_name}' {action}d successfully."
+            else:
+                return False, f"Failed to {action} adapter. Error: {result.stderr}"
+        except subprocess.CalledProcessError as e:
+            return False, f"Failed to {action} adapter. Make sure to run as administrator. Error: {e.stderr}"
+        except FileNotFoundError:
+            return False, "The 'netsh' command was not found. This script requires it to run."
 
     def check_internet_connection(self):
         """Test internet connectivity by trying to reach Google's DNS server and a well-known website."""

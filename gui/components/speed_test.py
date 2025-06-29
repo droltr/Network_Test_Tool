@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                             QGroupBox, QGridLayout, QPushButton, QTextEdit,
-                            QProgressBar, QFrame)
+                            QProgressBar, QFrame, QFileDialog)
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QFont
 from network.speed_test import SpeedTester
@@ -38,6 +38,11 @@ class SpeedTestWidget(QWidget):
         self.speed_tester = SpeedTester()
         self.setup_ui()
         
+    def cleanup(self):
+        if hasattr(self, 'test_thread') and self.test_thread and self.test_thread.isRunning():
+            self.test_thread.stop()
+            self.test_thread.wait()
+
     def setup_ui(self):
         layout = QVBoxLayout(self)
         
@@ -124,10 +129,17 @@ class SpeedTestWidget(QWidget):
         self.results_text.setPlaceholderText("Speed test results will appear here...")
         log_layout.addWidget(self.results_text)
         
-        # Clear log button
+        # Clear log and export buttons
+        log_button_layout = QHBoxLayout()
         clear_btn = QPushButton("Clear Log")
         clear_btn.clicked.connect(self.clear_log)
-        log_layout.addWidget(clear_btn)
+        self.export_btn = QPushButton("Export Log")
+        self.export_btn.clicked.connect(self.export_log)
+        self.export_btn.setEnabled(False)
+        log_button_layout.addWidget(clear_btn)
+        log_button_layout.addWidget(self.export_btn)
+        log_button_layout.addStretch()
+        log_layout.addLayout(log_button_layout)
         
         results_layout.addWidget(log_group)
         
@@ -219,6 +231,8 @@ class SpeedTestWidget(QWidget):
         if server.get('distance'):
             self.results_text.append(f"Distance: {server['distance']} km")
         
+        self.export_btn.setEnabled(True)
+
     def on_latency_complete(self, result):
         """Handle latency test completion."""
         self.full_test_btn.setEnabled(True)
@@ -246,6 +260,8 @@ class SpeedTestWidget(QWidget):
         self.results_text.append(f"Min Latency: {min_latency} ms")
         self.results_text.append(f"Max Latency: {max_latency} ms")
         self.results_text.append(f"Packet Loss: {packet_loss}%")
+
+        self.export_btn.setEnabled(True)
         
     def reset_display(self):
         """Reset the speed display."""
@@ -257,3 +273,22 @@ class SpeedTestWidget(QWidget):
     def clear_log(self):
         """Clear the results log."""
         self.results_text.clear()
+        self.export_btn.setEnabled(False)
+
+    def export_log(self):
+        """Export the test results to a text file."""
+        log_content = self.results_text.toPlainText()
+        if not log_content:
+            return
+
+        # Open file dialog
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save Log File", "", "Text Files (*.txt);;All Files (*)", options=options)
+
+        if file_path:
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(log_content)
+            except Exception as e:
+                self.results_text.append(f"\nError saving log: {e}")

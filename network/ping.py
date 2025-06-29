@@ -26,21 +26,27 @@ class PingTester:
             
             for i in range(count):
                 sent += 1
-                response_time = self._single_ping(host, timeout)
+                ping_data = self._single_ping(host, timeout)
                 
-                if response_time is not None:
+                if ping_data and ping_data.get('time') is not None:
                     received += 1
+                    response_time = ping_data['time']
+                    ttl = ping_data.get('ttl')
                     times.append(response_time)
                     status = "Reply"
                     message = f"Reply from {host}: time={response_time:.1f}ms"
+                    if ttl:
+                        message += f" TTL={ttl}"
                 else:
+                    response_time = None
                     status = "Timeout"
                     message = f"Request timeout for {host}"
                 
                 results['responses'].append({
                     'sequence': i + 1,
                     'time': response_time,
-                    'status': status
+                    'status': status,
+                    'ttl': ttl if 'ttl' in locals() else None
                 })
                 
                 if progress_callback:
@@ -76,31 +82,35 @@ class PingTester:
             return {'error': str(e), 'host': host}
     
     def _single_ping(self, host, timeout):
-        """Perform a single ping and return response time in milliseconds"""
+        """Perform a single ping and return response time and TTL."""
         try:
             if self.platform == "windows":
                 cmd = ["ping", "-n", "1", "-w", str(timeout * 1000), host]
             else:
                 cmd = ["ping", "-c", "1", "-W", str(timeout), host]
             
-            start_time = time.time()
-            result = subprocess.run(cmd, capture_output=True, timeout=timeout + 1)
-            end_time = time.time()
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 1)
             
             if result.returncode == 0:
-                # Parse response time from output
-                output = result.stdout.decode('utf-8').decode('utf-8')
+                output = result.stdout.lower()
+                response_time = None
+                ttl = None
+
+                # Parse time and TTL
                 if self.platform == "windows":
-                    if "time=" in output:
-                        time_str = output.split("time=")[1].split("ms")[0]
-                        return float(time_str)
-                else:
-                    if "time=" in output:
-                        time_str = output.split("time=")[1].split(" ")[0]
-                        return float(time_str)
+                    if "time=" in output and "ttl=" in output:
+                        time_str = output.split("time=")[1].split("ms")[0].strip()
+                        ttl_str = output.split("ttl=")[1].split()[0].strip()
+                        response_time = float(time_str)
+                        ttl = int(ttl_str)
+                else: # Linux/macOS
+                    if "time=" in output and "ttl=" in output:
+                        time_str = output.split("time=")[1].split("ms")[0].strip()
+                        ttl_str = output.split("ttl=")[1].split()[0].strip()
+                        response_time = float(time_str)
+                        ttl = int(ttl_str)
                 
-                # If parsing fails, calculate from execution time
-                return (end_time - start_time) * 1000
+                return {"time": response_time, "ttl": ttl}
             else:
                 return None
                 

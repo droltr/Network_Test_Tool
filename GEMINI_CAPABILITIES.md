@@ -13,3 +13,4 @@
 - Kullanıcı isteklerini ve program yeteneklerini belgeleyen dosyalar oluşturma ve güncelleme.
 - Git ile versiyonlama ve yedekleme.
 - Kullanıcıdan geri bildirim alma.
+- Test planları oluşturma.

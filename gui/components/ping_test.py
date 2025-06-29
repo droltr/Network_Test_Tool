@@ -101,6 +101,12 @@ class PingTestWidget(QWidget):
         
         layout.addWidget(results_group)
         
+    def cleanup(self):
+        self.update_timer.stop()
+        if hasattr(self, 'ping_thread') and self.ping_thread and self.ping_thread.isRunning():
+            self.ping_thread.quit()
+            self.ping_thread.wait()
+
     def process_update_queue(self):
         if self.update_queue:
             # Append all messages in the queue at once

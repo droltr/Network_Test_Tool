@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                             QGroupBox, QGridLayout, QPushButton, QLineEdit,
                             QTextEdit, QProgressBar, QComboBox, QListWidget,
-                            QListWidgetItem, QCheckBox)
+                            QListWidgetItem, QCheckBox, QFileDialog)
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QFont
 from network.scanner import PortScanner
@@ -45,6 +45,11 @@ class PortScannerWidget(QWidget):
         self.scanner = PortScanner()
         self.setup_ui()
         
+    def cleanup(self):
+        if hasattr(self, 'scan_thread') and self.scan_thread and self.scan_thread.isRunning():
+            self.scan_thread.stop()
+            self.scan_thread.wait()
+
     def setup_ui(self):
         layout = QVBoxLayout(self)
         
@@ -103,10 +108,14 @@ class PortScannerWidget(QWidget):
         self.stop_btn = QPushButton("Stop Scan")
         self.stop_btn.clicked.connect(self.stop_scan)
         self.stop_btn.setEnabled(False)
+        self.export_btn = QPushButton("Export Log")
+        self.export_btn.clicked.connect(self.export_log)
+        self.export_btn.setEnabled(False) # Disabled until scan is complete
         
         button_layout = QHBoxLayout()
         button_layout.addWidget(self.start_btn)
         button_layout.addWidget(self.stop_btn)
+        button_layout.addWidget(self.export_btn)
         button_layout.addStretch()
         
         input_layout.addLayout(button_layout, 4, 0, 1, 2)
@@ -270,3 +279,23 @@ class PortScannerWidget(QWidget):
                 port = result.get('port', 0)
                 service = result.get('service', 'Unknown')
                 self.results_text.append(f"  • Port {port} ({service})")
+        
+        self.export_btn.setEnabled(True)
+
+    def export_log(self):
+        """Export the scan results to a text file."""
+        log_content = self.results_text.toPlainText()
+        if not log_content:
+            return
+
+        # Open file dialog
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save Log File", "", "Text Files (*.txt);;All Files (*)", options=options)
+
+        if file_path:
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(log_content)
+            except Exception as e:
+                self.results_text.append(f"\nError saving log: {e}")
