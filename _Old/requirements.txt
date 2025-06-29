@@ -1,0 +1,6 @@
+PyQt5==5.15.9
+psutil==5.9.5
+netifaces==0.11.0
+requests==2.31.0
+scapy==2.5.0
+speedtest-cli

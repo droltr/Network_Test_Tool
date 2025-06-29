@@ -1,0 +1,166 @@
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+                            QGroupBox, QGridLayout, QPushButton, QLineEdit,
+                            QSpinBox, QTextEdit, QProgressBar)
+from PyQt5.QtCore import QThread, pyqtSignal, QTimer
+from PyQt5.QtGui import QFont
+from network.ping import PingTester
+
+class PingThread(QThread):
+    result_ready = pyqtSignal(dict)
+    progress_update = pyqtSignal(str)
+    
+    def __init__(self, host, count):
+        super().__init__()
+        self.host = host
+        self.count = count
+        
+    def run(self):
+        try:
+            tester = PingTester()
+            result = tester.ping_host(self.host, self.count, progress_callback=self.progress_update.emit)
+            self.result_ready.emit(result)
+        except Exception as e:
+            self.result_ready.emit({"error": str(e)})
+
+class PingTestWidget(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setup_ui()
+        self.update_queue = []
+        self.update_timer = QTimer(self)
+        self.update_timer.setInterval(200) # Update every 200ms
+        self.update_timer.timeout.connect(self.process_update_queue)
+        self.update_timer.start()
+        
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        
+        # Header
+        header = QLabel("Ping Test")
+        header.setFont(QFont("Arial", 16, QFont.Bold))
+        layout.addWidget(header)
+        
+        # Input group
+        input_group = QGroupBox("Ping Settings")
+        input_layout = QGridLayout(input_group)
+        
+        # Host input
+        input_layout.addWidget(QLabel("Target Host:"), 0, 0)
+        self.host_input = QLineEdit()
+        self.host_input.setPlaceholderText("Enter IP address or hostname (e.g., google.com)")
+        self.host_input.setText("8.8.8.8")
+        input_layout.addWidget(self.host_input, 0, 1)
+        
+        # Count input
+        input_layout.addWidget(QLabel("Ping Count:"), 1, 0)
+        self.count_input = QSpinBox()
+        self.count_input.setMinimum(1)
+        self.count_input.setMaximum(100)
+        self.count_input.setValue(4)
+        input_layout.addWidget(self.count_input, 1, 1)
+        
+        # Start button
+        self.start_btn = QPushButton("Start Ping Test")
+        self.start_btn.clicked.connect(self.start_ping)
+        input_layout.addWidget(self.start_btn, 2, 0, 1, 2)
+        
+        layout.addWidget(input_group)
+        
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
+        
+        # Results group
+        results_group = QGroupBox("Results")
+        results_layout = QVBoxLayout(results_group)
+        
+        # Statistics
+        stats_layout = QGridLayout()
+        self.sent_label = QLabel("Sent: 0")
+        self.received_label = QLabel("Received: 0")
+        self.lost_label = QLabel("Lost: 0")
+        self.min_label = QLabel("Min: 0 ms")
+        self.max_label = QLabel("Max: 0 ms")
+        self.avg_label = QLabel("Avg: 0 ms")
+        
+        stats_layout.addWidget(self.sent_label, 0, 0)
+        stats_layout.addWidget(self.received_label, 0, 1)
+        stats_layout.addWidget(self.lost_label, 0, 2)
+        stats_layout.addWidget(self.min_label, 1, 0)
+        stats_layout.addWidget(self.max_label, 1, 1)
+        stats_layout.addWidget(self.avg_label, 1, 2)
+        
+        results_layout.addLayout(stats_layout)
+        
+        # Detailed results
+        self.results_text = QTextEdit()
+        self.results_text.setMaximumHeight(200)
+        self.results_text.setPlaceholderText("Ping results will appear here...")
+        results_layout.addWidget(self.results_text)
+        
+        layout.addWidget(results_group)
+        
+    def process_update_queue(self):
+        if self.update_queue:
+            # Append all messages in the queue at once
+            self.results_text.append("\n".join(self.update_queue))
+            self.update_queue.clear()
+            # Update progress bar once after all messages are processed
+            current_value = self.progress_bar.value()
+            self.progress_bar.setValue(current_value + 1)
+
+    def start_ping(self):
+        host = self.host_input.text().strip()
+        if not host:
+            self.results_text.append("Error: Please enter a host to ping")
+            return
+            
+        count = self.count_input.value()
+        
+        self.start_btn.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, count)
+        self.progress_bar.setValue(0)
+        self.results_text.clear()
+        
+        # Reset statistics
+        self.sent_label.setText("Sent: 0")
+        self.received_label.setText("Received: 0")
+        self.lost_label.setText("Lost: 0")
+        self.min_label.setText("Min: 0 ms")
+        self.max_label.setText("Max: 0 ms")
+        self.avg_label.setText("Avg: 0 ms")
+        
+        # Start ping thread
+        self.ping_thread = PingThread(host, count)
+        self.ping_thread.result_ready.connect(self.on_ping_finished)
+        self.ping_thread.progress_update.connect(self.on_ping_progress)
+        self.ping_thread.start()
+        
+    def on_ping_progress(self, message):
+        self.update_queue.append(message)
+        
+    def on_ping_finished(self, result):
+        self.start_btn.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        
+        if "error" in result:
+            self.results_text.append(f"Error: {result['error']}")
+            return
+            
+        # Update statistics
+        stats = result.get('statistics', {})
+        self.sent_label.setText(f"Sent: {stats.get('sent', 0)}")
+        self.received_label.setText(f"Received: {stats.get('received', 0)}")
+        self.lost_label.setText(f"Lost: {stats.get('lost', 0)}")
+        
+        if stats.get('times'):
+            times = stats['times']
+            self.min_label.setText(f"Min: {min(times):.1f} ms")
+            self.max_label.setText(f"Max: {max(times):.1f} ms")
+            self.avg_label.setText(f"Avg: {sum(times)/len(times):.1f} ms")
+            
+        self.results_text.append(f"\n--- Ping Test Complete ---")
+        self.results_text.append(f"Host: {result.get('host', 'Unknown')}")
+        self.results_text.append(f"Success Rate: {stats.get('success_rate', 0):.1f}%")
