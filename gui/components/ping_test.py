@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                             QGroupBox, QGridLayout, QPushButton, QLineEdit,
-                            QSpinBox, QTextEdit, QProgressBar)
-from PyQt5.QtCore import QThread, pyqtSignal, QTimer
+                            QSpinBox, QTextEdit, QProgressBar, QCompleter)
+from PyQt5.QtCore import QThread, pyqtSignal, QTimer, QSettings
 from PyQt5.QtGui import QFont
 from network.ping import PingTester
 
@@ -25,12 +25,22 @@ class PingThread(QThread):
 class PingTestWidget(QWidget):
     def __init__(self):
         super().__init__()
+        self.settings = QSettings("NetworkTools", "PingTest")
+        self.history = self.settings.value("host_history", [], type=list)
         self.setup_ui()
-        self.update_queue = []
-        self.update_timer = QTimer(self)
-        self.update_timer.setInterval(200) # Update every 200ms
-        self.update_timer.timeout.connect(self.process_update_queue)
-        self.update_timer.start()
+        self.load_history()
+        
+    def load_history(self):
+        completer = QCompleter(self.history, self)
+        self.host_input.setCompleter(completer)
+
+    def save_history(self):
+        if self.host_input.text() not in self.history:
+            self.history.insert(0, self.host_input.text())
+            if len(self.history) > 10: # Keep last 10 entries
+                self.history.pop()
+            self.settings.setValue("host_history", self.history)
+            self.load_history() # Update completer
         
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -102,19 +112,9 @@ class PingTestWidget(QWidget):
         layout.addWidget(results_group)
         
     def cleanup(self):
-        self.update_timer.stop()
         if hasattr(self, 'ping_thread') and self.ping_thread and self.ping_thread.isRunning():
             self.ping_thread.quit()
             self.ping_thread.wait()
-
-    def process_update_queue(self):
-        if self.update_queue:
-            # Append all messages in the queue at once
-            self.results_text.append("\n".join(self.update_queue))
-            self.update_queue.clear()
-            # Update progress bar once after all messages are processed
-            current_value = self.progress_bar.value()
-            self.progress_bar.setValue(current_value + 1)
 
     def start_ping(self):
         host = self.host_input.text().strip()
@@ -145,7 +145,8 @@ class PingTestWidget(QWidget):
         self.ping_thread.start()
         
     def on_ping_progress(self, message):
-        self.update_queue.append(message)
+        self.results_text.append(message)
+        self.progress_bar.setValue(self.progress_bar.value() + 1)
         
     def on_ping_finished(self, result):
         self.start_btn.setEnabled(True)
@@ -155,6 +156,9 @@ class PingTestWidget(QWidget):
             self.results_text.append(f"Error: {result['error']}")
             return
             
+        # Save host to history
+        self.save_history()
+
         # Update statistics
         stats = result.get('statistics', {})
         self.sent_label.setText(f"Sent: {stats.get('sent', 0)}")

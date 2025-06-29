@@ -1,9 +1,11 @@
-Starting port scan on 192.168.40.3
+Starting port scan on 8.8.8.8
 Scanning 11 ports with 1.0s timeout
 ==================================================
 Port 25: OPEN (smtp)
+Port 53: OPEN (domain)
 Port 110: OPEN (pop3)
 Port 143: OPEN (imap)
+Port 443: OPEN (https)
 Port 993: OPEN (imaps)
 Port 995: OPEN (pop3s)
 
@@ -11,13 +13,15 @@ Port 995: OPEN (pop3s)
 SCAN SUMMARY
 ==================================================
 Total ports scanned: 11
-Open ports: 5
-Closed ports: 6
+Open ports: 7
+Closed ports: 4
 Errors: 0
 
-Found 5 open port(s):
+Found 7 open port(s):
   • Port 25 (smtp)
+  • Port 53 (domain)
   • Port 110 (pop3)
   • Port 143 (imap)
+  • Port 443 (https)
   • Port 993 (imaps)
   • Port 995 (pop3s)

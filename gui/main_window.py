@@ -3,7 +3,7 @@ import webbrowser
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                             QTabWidget, QLabel, QFrame, QPushButton, QTextEdit,
                             QLineEdit, QSpinBox, QProgressBar, QGroupBox, QGridLayout,
-                            QMessageBox, QComboBox, QListWidget, QSplitter, QApplication, QAction)
+                            QMessageBox, QComboBox, QListWidget, QSplitter, QApplication, QAction, QSizePolicy)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QPalette, QColor, QIcon
 from .components.network_status import NetworkStatusWidget
@@ -92,6 +92,8 @@ class MainWindow(QMainWindow):
         footer_label.setObjectName("footerLabel")
 
         exit_button = QPushButton("Exit")
+        exit_button.setFixedSize(100, 30) # Set a fixed size
+        exit_button.setStyleSheet("background-color: #BF616A; color: white; border-radius: 5px;") # Add some styling
         exit_button.clicked.connect(self.close)
         
         layout.addWidget(footer_label)
@@ -126,6 +128,8 @@ class MainWindow(QMainWindow):
 
     def create_menu_bar(self):
         menu_bar = self.menuBar()
+        menu_bar.setStyleSheet("QMenuBar::item { padding-right: 20px; } QMenuBar::item:last { margin-left: auto; }")
+
         help_menu = menu_bar.addMenu("Help")
 
         about_action = QAction("About", self)

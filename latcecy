@@ -1,0 +1,10 @@
+Starting latency test...
+
+========================================
+LATENCY TEST RESULTS
+========================================
+Host: 8.8.8.8
+Average Latency: 10.0 ms
+Min Latency: 10.0 ms
+Max Latency: 10.0 ms
+Packet Loss: 0%

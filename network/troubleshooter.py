@@ -4,11 +4,13 @@ import socket
 from datetime import datetime
 from .detector import NetworkDetector
 from .ping import PingTester
+from .speed_test import SpeedTester
 
 class Troubleshooter:
     def __init__(self):
         self.detector = NetworkDetector()
         self.ping_tester = PingTester()
+        self.speed_tester = SpeedTester()
 
     def run_troubleshooting(self, progress_callback=None):
         log = []
@@ -23,12 +25,22 @@ class Troubleshooter:
         log_and_callback("1. Gathering Device and Network Information...")
         info = self.detector.get_network_info()
         log_and_callback(f"    Hostname: {info.get('hostname', 'N/A')}")
+        log_and_callback(f"    Operating System: {platform.system()} {platform.release()}")
+        log_and_callback(f"    Processor: {platform.processor()}")
+        log_and_callback(f"    Python Version: {platform.python_version()}\n")
+
+        log_and_callback("    Network Interfaces:")
         for iface in info.get('interfaces', []):
-            log_and_callback(f"    Interface: {iface.get('name')}, IP: {iface.get('ipv4', 'N/A')}, MAC: {iface.get('mac', 'N/A')}, Status: {iface.get('status', 'N/A')}")
-        log_and_callback(f"    Gateway: {info.get('gateway', 'N/A')}")
-        log_and_callback(f"    DNS Servers: {info.get('dns', 'N/A')}\n")
+            log_and_callback(f"        Name: {iface.get('name', 'N/A')}")
+            log_and_callback(f"        Status: {iface.get('status', 'N/A')}")
+            log_and_callback(f"        IPv4: {iface.get('ipv4', 'N/A')}")
+            log_and_callback(f"        MAC: {iface.get('mac', 'N/A')}\n")
+
+        log_and_callback(f"    Default Gateway: {info.get('gateway', ['N/A'])[0]}")
+        log_and_callback(f"    DNS Servers: {', '.join(info.get('dns', ['N/A']))}\n")
 
         # 2. Connectivity Tests
+
         log_and_callback("2. Performing Connectivity Tests...")
         # Ping Gateway
         gateway = info.get('gateway', [None])[0]
@@ -65,6 +77,17 @@ class Troubleshooter:
         # 3. Traceroute
         log_and_callback("3. Performing Traceroute to 8.8.8.8...")
         log.extend(self.run_traceroute("8.8.8.8", progress_callback))
+
+        # 4. Speed Test
+        log_and_callback("\n4. Performing Speed Test...")
+        speed_test_results = self.speed_tester.perform_speed_test(progress_callback=lambda p, m: log_and_callback(f"    Speed Test Progress: {m}"))
+        if speed_test_results and not speed_test_results.get('error'):
+            log_and_callback(f"    Download Speed: {speed_test_results.get('download_speed', 'N/A')} Mbps")
+            log_and_callback(f"    Upload Speed: {speed_test_results.get('upload_speed', 'N/A')} Mbps")
+            log_and_callback(f"    Ping: {speed_test_results.get('ping', 'N/A')} ms")
+            log_and_callback(f"    Server: {speed_test_results.get('server', {}).get('name', 'N/A')}")
+        else:
+            log_and_callback(f"    Speed test failed: {speed_test_results.get('error', 'Unknown error')}")
 
         log_and_callback("\n--- Troubleshooting Complete ---")
         return "\n".join(log)

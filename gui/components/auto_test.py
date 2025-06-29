@@ -22,7 +22,7 @@ class AutoTestWidget(QWidget):
         self.setup_ui()
 
     def cleanup(self):
-        if hasattr(self, 'thread') and self.thread and self.thread.isRunning():
+        if hasattr(self, 'thread') and isinstance(self.thread, QThread) and self.thread.isRunning():
             self.thread.quit()
             self.thread.wait()
 
@@ -54,6 +54,16 @@ class AutoTestWidget(QWidget):
         self.results_text.setReadOnly(True)
         self.results_text.setPlaceholderText("Troubleshooting log will appear here...")
         results_layout.addWidget(self.results_text)
+        
+        # Clear log button
+        clear_btn_layout = QHBoxLayout()
+        self.clear_btn = QPushButton("Clear Log")
+        self.clear_btn.clicked.connect(self.results_text.clear)
+        clear_btn_layout.addStretch()
+        clear_btn_layout.addWidget(self.clear_btn)
+        clear_btn_layout.addStretch()
+        results_layout.addLayout(clear_btn_layout)
+
         layout.addWidget(results_group)
 
     def start_troubleshooting(self):

@@ -6,6 +6,11 @@ from datetime import datetime
 from typing import List
 import ipaddress
 import re
+import logging
+
+# Configure logging to a file
+logging.basicConfig(filename='network_detector_debug.log', level=logging.DEBUG,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Try to import netifaces, use fallback if not available
 try:
@@ -29,13 +34,21 @@ class NetworkDetector:
                 'interfaces': self.get_network_interfaces(),
                 'timestamp': datetime.now().isoformat()
             }
+            logging.debug(f"NetworkDetector.get_network_info - Collected info: {info}")
             return info
         except Exception as e:
+            logging.error(f"NetworkDetector.get_network_info - {e}")
             return {'error': str(e)}
     
     def get_hostname(self):
         """Get computer hostname"""
-        return socket.gethostname()
+        try:
+            hostname = socket.gethostname()
+            logging.debug(f"get_hostname - {hostname}")
+            return hostname
+        except Exception as e:
+            logging.error(f"get_hostname - {e}")
+            return "N/A"
     
     def get_local_ip(self) -> list[str]:
         """Get all local IP addresses (IPv4) for active interfaces."""
@@ -45,11 +58,10 @@ class NetworkDetector:
                 for addr in addrs:
                     if addr.family == socket.AF_INET and not addr.address.startswith('127.'): # Exclude loopback
                         ip_addresses.append(addr.address)
-            print(f"DEBUG: get_local_ip - Detected IPs: {ip_addresses}")
+            logging.debug(f"get_local_ip - {ip_addresses}")
         except Exception as e:
-            print(f"DEBUG: get_local_ip - Error: {e}")
-            pass
-        return ip_addresses if ip_addresses else ["Unable to determine"]
+            logging.error(f"get_local_ip - {e}")
+        return ip_addresses if ip_addresses else ["N/A"]
     
     def get_default_gateway(self) -> list[str]:
         """Get default gateway IP addresses."""
@@ -61,9 +73,9 @@ class NetworkDetector:
                     if gw_family in gws and gws[gw_family]:
                         for gw_info in gws[gw_family]:
                             gateways.append(gw_info[0])
-                print(f"DEBUG: get_default_gateway - Detected Gateways (netifaces): {gateways}")
+                logging.debug(f"get_default_gateway - {gateways}")
             except Exception as e:
-                print(f"DEBUG: get_default_gateway - Error (netifaces): {e}")
+                logging.error(f"get_default_gateway - {e}")
         
         if not gateways and self.platform == "windows":
             try:
@@ -76,10 +88,10 @@ class NetworkDetector:
                             gateway = parts[1].strip()
                             if gateway and gateway != '0.0.0.0':
                                 gateways.append(gateway)
-                print(f"DEBUG: get_default_gateway - Detected Gateways (ipconfig): {gateways}")
+                logging.debug(f"get_default_gateway (ipconfig) - {gateways}")
             except Exception as e:
-                print(f"DEBUG: get_default_gateway - Error (ipconfig): {e}")
-        return gateways if gateways else ["Unable to determine"]
+                logging.error(f"get_default_gateway (ipconfig) - {e}")
+        return gateways if gateways else ["N/A"]
     
     def get_dns_servers(self) -> list[str]:
         """Get DNS server addresses."""
@@ -103,11 +115,10 @@ class NetworkDetector:
                             ip = line.split()[1].strip()
                             if ip not in dns_servers:
                                 dns_servers.append(ip)
-            print(f"DEBUG: get_dns_servers - Detected DNS: {dns_servers}")
+            logging.debug(f"get_dns_servers - {dns_servers}")
         except Exception as e:
-            print(f"DEBUG: get_dns_servers - Error: {e}")
-            pass
-        return dns_servers if dns_servers else ["Unable to determine"]
+            logging.error(f"get_dns_servers - {e}")
+        return dns_servers if dns_servers else ["N/A"]
     
     def get_mac_address(self):
         """Get MAC address of primary interface"""
@@ -116,36 +127,65 @@ class NetworkDetector:
             for interface, addrs in interfaces.items():
                 for addr in addrs:
                     if addr.family == psutil.AF_LINK and addr.address != '00:00:00:00:00:00':
+                        logging.debug(f"get_mac_address - {addr.address}")
                         return addr.address
-            return "Unable to determine"
-        except:
-            return "Unable to determine"
+            logging.debug(f"get_mac_address - No MAC found")
+            return "N/A"
+        except Exception as e:
+            logging.error(f"get_mac_address - {e}")
+            return "N/A"
     
     def get_connection_status(self):
         """Get network connection status"""
         connections = []
+        logging.debug("Getting connection status...")
         
         # Test internet connectivity
-        internet_status = self.check_internet_connection()
-        connections.append({
-            'status': 'Connected' if internet_status else 'Disconnected',
-            'description': 'Internet Connection'
-        })
+        try:
+            internet_status = self.check_internet_connection()
+            connections.append({
+                'status': 'Connected' if internet_status else 'Disconnected',
+                'description': 'Internet Connection'
+            })
+            logging.debug(f"Internet connection status: {'Connected' if internet_status else 'Disconnected'}")
+        except Exception as e:
+            logging.error(f"Error checking internet connection: {str(e)}")
+            connections.append({
+                'status': 'Error',
+                'description': 'Internet Connection'
+            })
         
         # Test local network connectivity
-        local_status = self.test_local_network()
-        connections.append({
-            'status': 'Connected' if local_status else 'Disconnected',
-            'description': 'Local Network'
-        })
+        try:
+            local_status = self.test_local_network()
+            connections.append({
+                'status': 'Connected' if local_status else 'Disconnected',
+                'description': 'Local Network'
+            })
+            logging.debug(f"Local network status: {'Connected' if local_status else 'Disconnected'}")
+        except Exception as e:
+            logging.error(f"Error checking local network: {str(e)}")
+            connections.append({
+                'status': 'Error',
+                'description': 'Local Network'
+            })
         
         # Test DNS resolution
-        dns_status = self.test_dns_resolution()
-        connections.append({
-            'status': 'Working' if dns_status else 'Failed',
-            'description': 'DNS Resolution'
-        })
+        try:
+            dns_status = self.test_dns_resolution()
+            connections.append({
+                'status': 'Working' if dns_status else 'Failed',
+                'description': 'DNS Resolution'
+            })
+            logging.debug(f"DNS resolution status: {'Working' if dns_status else 'Failed'}")
+        except Exception as e:
+            logging.error(f"Error checking DNS resolution: {str(e)}")
+            connections.append({
+                'status': 'Error',
+                'description': 'DNS Resolution'
+            })
         
+        logging.debug(f"Final connection statuses: {connections}")
         return connections
     
     def get_network_interfaces(self):
@@ -155,7 +195,7 @@ class NetworkDetector:
             # Get basic interface info with psutil
             net_interfaces = psutil.net_if_addrs()
             for interface_name, addrs in net_interfaces.items():
-                interface_info = {'name': interface_name, 'status': 'Unknown'}
+                interface_info = {'name': interface_name, 'status': 'Unknown', 'ipv4': 'N/A', 'mac': 'N/A'}
                 for addr in addrs:
                     if addr.family == socket.AF_INET:
                         interface_info['ipv4'] = addr.address
@@ -180,10 +220,11 @@ class NetworkDetector:
                 except (subprocess.CalledProcessError, FileNotFoundError):
                     pass # netsh might not be available or fail
 
-            print(f"DEBUG: get_network_interfaces - Detected Interfaces: {interfaces}")
+            logging.debug(f"get_network_interfaces - Detected Interfaces: {interfaces}")
             return interfaces
         except Exception as e:
-            print(f"DEBUG: get_network_interfaces - Error: {e}")
+            logging.error(f"get_network_interfaces - Error: {e}")
+            return []
             return []
 
     def set_adapter_state(self, adapter_name, state):
@@ -213,34 +254,44 @@ class NetworkDetector:
             # Try to fetch a small page from a reliable website
             import urllib.request
             urllib.request.urlopen("http://www.google.com", timeout=2)
+            logging.debug("Internet connection test: Connected")
             return True
-        except:
+        except Exception as e:
+            logging.debug(f"Internet connection test failed: {str(e)}")
             return False
     
     def test_local_network(self):
         """Test local network connectivity by trying to reach the default gateway(s)."""
         gateways = self.get_default_gateway()
+        logging.debug(f"Testing local network with gateways: {gateways}")
         for gateway in gateways:
-            if gateway != "Unable to determine":
+            if gateway != "Unable to determine" and gateway != "N/A":
                 try:
                     # Try to ping the gateway
                     if platform.system().lower() == 'windows':
                         cmd = ['ping', '-n', '1', gateway]
                     else:
                         cmd = ['ping', '-c', '1', gateway]
+                    logging.debug(f"Running ping command: {' '.join(cmd)}")
                     result = subprocess.run(cmd, capture_output=True, text=True, timeout=3, encoding='cp850')
                     if result.returncode == 0:
+                        logging.debug(f"Local network test to {gateway} successful")
                         return True
-                except Exception:
-                    pass
+                    else:
+                        logging.debug(f"Ping to {gateway} failed with return code {result.returncode}")
+                except Exception as e:
+                    logging.debug(f"Error pinging gateway {gateway}: {str(e)}")
+        logging.debug("Local network test failed for all gateways")
         return False
     
     def test_dns_resolution(self):
         """Test DNS resolution"""
         try:
-            socket.gethostbyname("google.com")
+            resolved_ip = socket.gethostbyname("google.com")
+            logging.debug(f"DNS resolution successful: google.com -> {resolved_ip}")
             return True
-        except:
+        except Exception as e:
+            logging.debug(f"DNS resolution failed: {str(e)}")
             return False
 
     def detect_network_issues(self):

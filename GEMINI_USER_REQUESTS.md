@@ -1,24 +1,15 @@
 # Kullanıcı İstekleri
 
 ## Network Status Ekranı
-- Başladığı andan itibaren otomatik olarak auto refresh etsin. (Hala sorunlu - OFF görünüyor)
 - Connection status kısmında hata varsa ":" öncesinde gelen kelime kalın, sonrasında gelen kelime kırmızı olsun. 
-- Ağ kartlarını disable/enable edebileceğim bir buton ekle.
 
 ## Ping Testi
-- Ping satırında TTL görmek istiyorum.
 
 ## Port Scanner
-- Tespit edilen portlar log olarak dışarı aktarılabilsin.
 
 ## Speedtest
-- Test sonuçları log olarak dışarı aktarılabilsin.
 
 ## Arayüz Genel
-- Exit butonu eklensin.
-- Ready görseli, bağlantı sorunu bulunamazsa OK olarak görünsün.
-- Help, about menüleri eklensin.
-- droltr github linki verilsin.
 
 ## Eklenti
 - Olası sorunları test eden ping, trace, device bilgilerini içeren bir log dosyası oluşturan otomatik test widgeti tasarla ve ekle. Ayrı bir sekme olsun.

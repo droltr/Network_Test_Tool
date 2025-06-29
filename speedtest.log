@@ -1,0 +1,21 @@
+Starting latency test...
+
+========================================
+LATENCY TEST RESULTS
+========================================
+Host: 8.8.8.8
+Average Latency: 10.0 ms
+Min Latency: 10.0 ms
+Max Latency: 10.0 ms
+Packet Loss: 0%
+Starting full speed test...
+
+========================================
+SPEED TEST RESULTS
+========================================
+Download Speed: 768.17 Mbps
+Upload Speed: 581.89 Mbps
+Ping: 4.57 ms
+Server: Istanbul (AtlantisNet)
+Location: Turkey
+Distance: 2.79 km

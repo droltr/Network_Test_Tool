@@ -1,8 +1,8 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                             QGroupBox, QGridLayout, QPushButton, QLineEdit,
                             QTextEdit, QProgressBar, QComboBox, QListWidget,
-                            QListWidgetItem, QCheckBox, QFileDialog)
-from PyQt5.QtCore import QThread, pyqtSignal
+                            QListWidgetItem, QCheckBox, QFileDialog, QCompleter)
+from PyQt5.QtCore import QThread, pyqtSignal, QSettings
 from PyQt5.QtGui import QFont
 from network.scanner import PortScanner
 
@@ -42,8 +42,23 @@ class PortScanThread(QThread):
 class PortScannerWidget(QWidget):
     def __init__(self):
         super().__init__()
+        self.settings = QSettings("NetworkTools", "PortScanner")
+        self.history = self.settings.value("host_history", [], type=list)
         self.scanner = PortScanner()
         self.setup_ui()
+        self.load_history()
+        
+    def load_history(self):
+        completer = QCompleter(self.history, self)
+        self.host_input.setCompleter(completer)
+
+    def save_history(self):
+        if self.host_input.text() not in self.history:
+            self.history.insert(0, self.host_input.text())
+            if len(self.history) > 10: # Keep last 10 entries
+                self.history.pop()
+            self.settings.setValue("host_history", self.history)
+            self.load_history() # Update completer
         
     def cleanup(self):
         if hasattr(self, 'scan_thread') and self.scan_thread and self.scan_thread.isRunning():
@@ -212,6 +227,9 @@ class PortScannerWidget(QWidget):
         self.scan_thread.result_ready.connect(self.on_port_result)
         self.scan_thread.scan_complete.connect(self.on_scan_complete)
         self.scan_thread.start()
+
+        # Save host to history
+        self.save_history()
         
     def stop_scan(self):
         """Stop the current scan."""
