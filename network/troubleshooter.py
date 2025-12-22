@@ -31,10 +31,13 @@ class Troubleshooter:
 
         log_and_callback("    Network Interfaces:")
         for iface in info.get('interfaces', []):
-            log_and_callback(f"        Name: {iface.get('name', 'N/A')}")
-            log_and_callback(f"        Status: {iface.get('status', 'N/A')}")
-            log_and_callback(f"        IPv4: {iface.get('ipv4', 'N/A')}")
-            log_and_callback(f"        MAC: {iface.get('mac', 'N/A')}\n")
+            ipv4 = iface.get('ipv4', 'N/A')
+            # Only show active interfaces (not 127.x.x.x or 169.x.x.x)
+            if ipv4 != 'N/A' and not ipv4.startswith('127.') and not ipv4.startswith('169.'):
+                log_and_callback(f"        Name: {iface.get('name', 'N/A')}")
+                log_and_callback(f"        Status: {iface.get('status', 'N/A')}")
+                log_and_callback(f"        IPv4: {ipv4}")
+                log_and_callback(f"        MAC: {iface.get('mac', 'N/A')}\n")
 
         log_and_callback(f"    Default Gateway: {info.get('gateway', ['N/A'])[0]}")
         log_and_callback(f"    DNS Servers: {', '.join(info.get('dns', ['N/A']))}\n")
@@ -46,7 +49,7 @@ class Troubleshooter:
         gateway = info.get('gateway', [None])[0]
         if gateway:
             log_and_callback(f"    Pinging gateway ({gateway})...")
-            ping_result = self.ping_tester.ping_host(gateway, count=2)
+            ping_result = self.ping_tester.ping_host(gateway, count=3)
             if ping_result and not ping_result.get('error') and 'avg_time' in ping_result.get('statistics', {}):
                 log_and_callback(f"        Success ({ping_result['statistics']['avg_time']:.2f}ms avg)")
             else:
@@ -58,7 +61,7 @@ class Troubleshooter:
         dns_server = info.get('dns', [None])[0]
         if dns_server:
             log_and_callback(f"    Pinging primary DNS server ({dns_server})...")
-            ping_result = self.ping_tester.ping_host(dns_server, count=2)
+            ping_result = self.ping_tester.ping_host(dns_server, count=3)
             if ping_result and not ping_result.get('error') and 'avg_time' in ping_result.get('statistics', {}):
                 log_and_callback(f"        Success ({ping_result['statistics']['avg_time']:.2f}ms avg)")
             else:
@@ -68,26 +71,15 @@ class Troubleshooter:
 
         # Ping External Host
         log_and_callback("    Pinging external host (8.8.8.8)...")
-        ping_result = self.ping_tester.ping_host("8.8.8.8", count=2)
+        ping_result = self.ping_tester.ping_host("8.8.8.8", count=3)
         if ping_result and not ping_result.get('error') and 'avg_time' in ping_result.get('statistics', {}):
             log_and_callback(f"        Success ({ping_result['statistics']['avg_time']:.2f}ms avg)\n")
         else:
             log_and_callback("        Failed to ping external host.\n")
 
         # 3. Traceroute
-        log_and_callback("3. Performing Traceroute to 8.8.8.8...")
-        log.extend(self.run_traceroute("8.8.8.8", progress_callback))
-
-        # 4. Speed Test
-        log_and_callback("\n4. Performing Speed Test...")
-        speed_test_results = self.speed_tester.perform_speed_test(progress_callback=lambda p, m: log_and_callback(f"    Speed Test Progress: {m}"))
-        if speed_test_results and not speed_test_results.get('error'):
-            log_and_callback(f"    Download Speed: {speed_test_results.get('download_speed', 'N/A')} Mbps")
-            log_and_callback(f"    Upload Speed: {speed_test_results.get('upload_speed', 'N/A')} Mbps")
-            log_and_callback(f"    Ping: {speed_test_results.get('ping', 'N/A')} ms")
-            log_and_callback(f"    Server: {speed_test_results.get('server', {}).get('name', 'N/A')}")
-        else:
-            log_and_callback(f"    Speed test failed: {speed_test_results.get('error', 'Unknown error')}")
+        log_and_callback("3. Performing Traceroute to 1.1.1.1...")
+        log.extend(self.run_traceroute("1.1.1.1", progress_callback))
 
         log_and_callback("\n--- Troubleshooting Complete ---")
         return "\n".join(log)

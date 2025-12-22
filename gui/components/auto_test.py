@@ -28,18 +28,24 @@ class AutoTestWidget(QWidget):
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 15, 20, 15)
 
         # Header
         header = QLabel("Automated Network Troubleshooter")
-        header.setFont(QFont("Arial", 16, QFont.Bold))
+        header.setFont(QFont("Segoe UI", 14, QFont.Bold))
         layout.addWidget(header)
 
         # Controls
         controls_group = QGroupBox("Controls")
         controls_layout = QHBoxLayout(controls_group)
+        controls_layout.setContentsMargins(15, 20, 15, 15)
+        controls_layout.setSpacing(10)
         self.start_btn = QPushButton("Start Troubleshooting")
+        self.start_btn.setFixedHeight(40)
         self.start_btn.clicked.connect(self.start_troubleshooting)
         self.export_btn = QPushButton("Export Log")
+        self.export_btn.setFixedHeight(40)
         self.export_btn.clicked.connect(self.export_log)
         self.export_btn.setEnabled(False)
         controls_layout.addWidget(self.start_btn)
@@ -50,14 +56,18 @@ class AutoTestWidget(QWidget):
         # Results
         results_group = QGroupBox("Log")
         results_layout = QVBoxLayout(results_group)
+        results_layout.setContentsMargins(15, 20, 15, 15)
         self.results_text = QTextEdit()
+        self.results_text.setMinimumHeight(300)
         self.results_text.setReadOnly(True)
         self.results_text.setPlaceholderText("Troubleshooting log will appear here...")
         results_layout.addWidget(self.results_text)
         
         # Clear log button
         clear_btn_layout = QHBoxLayout()
+        clear_btn_layout.setSpacing(10)
         self.clear_btn = QPushButton("Clear Log")
+        self.clear_btn.setFixedHeight(35)
         self.clear_btn.clicked.connect(self.results_text.clear)
         clear_btn_layout.addStretch()
         clear_btn_layout.addWidget(self.clear_btn)
@@ -77,7 +87,14 @@ class AutoTestWidget(QWidget):
         self.thread.start()
 
     def update_log(self, message):
-        self.results_text.append(message)
+        # Prevent duplicate consecutive messages
+        current_text = self.results_text.toPlainText()
+        lines = current_text.split('\n')
+        last_line = lines[-1] if lines else ""
+        
+        # Only append if different from last line
+        if message.strip() != last_line.strip():
+            self.results_text.append(message)
 
     def on_complete(self, log):
         self.start_btn.setEnabled(True)

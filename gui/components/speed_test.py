@@ -45,23 +45,31 @@ class SpeedTestWidget(QWidget):
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 15, 20, 15)
         
         # Header
         header = QLabel("Internet Speed Test")
-        header.setFont(QFont("Arial", 16, QFont.Bold))
+        header.setFont(QFont("Segoe UI", 14, QFont.Bold))
         layout.addWidget(header)
         
         # Control group
         control_group = QGroupBox("Speed Test Controls")
         control_layout = QVBoxLayout(control_group)
+        control_layout.setContentsMargins(15, 20, 15, 15)
+        control_layout.setSpacing(10)
         
         # Test buttons
         button_layout = QHBoxLayout()
+        button_layout.setSpacing(10)
         self.full_test_btn = QPushButton("Full Speed Test")
+        self.full_test_btn.setFixedHeight(40)
         self.full_test_btn.clicked.connect(self.start_full_test)
-        self.latency_test_btn = QPushButton("Latency Test Only")
+        self.latency_test_btn = QPushButton("Latency Test")
+        self.latency_test_btn.setFixedHeight(40)
         self.latency_test_btn.clicked.connect(self.start_latency_test)
-        self.stop_btn = QPushButton("Stop Test")
+        self.stop_btn = QPushButton("Stop")
+        self.stop_btn.setFixedHeight(40)
         self.stop_btn.clicked.connect(self.stop_test)
         self.stop_btn.setEnabled(False)
         
@@ -74,6 +82,7 @@ class SpeedTestWidget(QWidget):
         
         # Progress
         self.progress_bar = QProgressBar()
+        self.progress_bar.setFixedHeight(25)
         self.progress_bar.setVisible(False)
         self.progress_label = QLabel("")
         
@@ -84,56 +93,67 @@ class SpeedTestWidget(QWidget):
         
         # Results display
         results_layout = QHBoxLayout()
+        results_layout.setSpacing(15)
         
         # Current results
         current_results_group = QGroupBox("Current Test Results")
         current_layout = QVBoxLayout(current_results_group)
+        current_layout.setContentsMargins(15, 20, 15, 15)
         
         # Speed metrics
         metrics_frame = QFrame()
         metrics_layout = QGridLayout(metrics_frame)
+        metrics_layout.setSpacing(15)
         
         # Download speed
-        metrics_layout.addWidget(QLabel("Download Speed:"), 0, 0)
+        metrics_layout.addWidget(QLabel("Download:"), 0, 0)
         self.download_label = QLabel("-- Mbps")
-        self.download_label.setFont(QFont("Arial", 12, QFont.Bold))
-        self.download_label.setStyleSheet("color: #88C0D0;")
+        self.download_label.setFont(QFont("Segoe UI", 13, QFont.Bold))
+        self.download_label.setStyleSheet("color: #61afef;")
         metrics_layout.addWidget(self.download_label, 0, 1)
         
         # Upload speed
-        metrics_layout.addWidget(QLabel("Upload Speed:"), 1, 0)
+        metrics_layout.addWidget(QLabel("Upload:"), 1, 0)
         self.upload_label = QLabel("-- Mbps")
-        self.upload_label.setFont(QFont("Arial", 12, QFont.Bold))
-        self.upload_label.setStyleSheet("color: #A3BE8C;")
+        self.upload_label.setFont(QFont("Segoe UI", 13, QFont.Bold))
+        self.upload_label.setStyleSheet("color: #98c379;")
         metrics_layout.addWidget(self.upload_label, 1, 1)
         
         # Ping
         metrics_layout.addWidget(QLabel("Ping:"), 2, 0)
         self.ping_label = QLabel("-- ms")
-        self.ping_label.setFont(QFont("Arial", 12, QFont.Bold))
-        self.ping_label.setStyleSheet("color: #EBCB8B;")
+        self.ping_label.setFont(QFont("Segoe UI", 13, QFont.Bold))
+        self.ping_label.setStyleSheet("color: #e5c07b;")
         metrics_layout.addWidget(self.ping_label, 2, 1)
         
         # Server info
         metrics_layout.addWidget(QLabel("Server:"), 3, 0)
         self.server_label = QLabel("--")
+        self.server_label.setWordWrap(True)
         metrics_layout.addWidget(self.server_label, 3, 1)
         
+        metrics_layout.setColumnStretch(1, 1)
+        
         current_layout.addWidget(metrics_frame)
-        results_layout.addWidget(current_results_group)
+        results_layout.addWidget(current_results_group, 1)
         
         # Detailed results log
         log_group = QGroupBox("Test Log")
         log_layout = QVBoxLayout(log_group)
+        log_layout.setContentsMargins(15, 20, 15, 15)
         self.results_text = QTextEdit()
+        self.results_text.setMinimumHeight(200)
         self.results_text.setPlaceholderText("Speed test results will appear here...")
         log_layout.addWidget(self.results_text)
         
         # Clear log and export buttons
         log_button_layout = QHBoxLayout()
+        log_button_layout.setSpacing(10)
         clear_btn = QPushButton("Clear Log")
+        clear_btn.setFixedHeight(35)
         clear_btn.clicked.connect(self.clear_log)
-        self.export_btn = QPushButton("Export Log")
+        self.export_btn = QPushButton("Export")
+        self.export_btn.setFixedHeight(35)
         self.export_btn.clicked.connect(self.export_log)
         self.export_btn.setEnabled(False)
         log_button_layout.addWidget(clear_btn)
@@ -141,7 +161,7 @@ class SpeedTestWidget(QWidget):
         log_button_layout.addStretch()
         log_layout.addLayout(log_button_layout)
         
-        results_layout.addWidget(log_group)
+        results_layout.addWidget(log_group, 1)
         
         layout.addLayout(results_layout)
         

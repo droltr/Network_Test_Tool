@@ -1,0 +1,46 @@
+--- Automated Network Troubleshooting --- (2025-12-22T22:00:06.911338)
+
+1. Gathering Device and Network Information...
+    Hostname: DT01
+    Operating System: Windows 11
+    Processor: AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD
+    Python Version: 3.13.11
+
+    Network Interfaces:
+        Name: Ethernet
+        Status: Unknown
+        IPv4: 192.168.1.4
+        MAC: 34-5a-60-7b-65-4e
+
+        Name: Wi-Fi
+        Status: Enabled
+        IPv4: 192.168.40.138
+        MAC: 84-9e-56-2f-96-45
+
+    Default Gateway: 192.168.1.1
+    DNS Servers: 1.1.1.1, 8.8.8.8, 192.168.1.1, 192.168.40.2
+
+2. Performing Connectivity Tests...
+    Pinging gateway (192.168.1.1)...
+        Success (1.00ms avg)
+    Pinging primary DNS server (1.1.1.1)...
+        Success (1.33ms avg)
+    Pinging external host (8.8.8.8)...
+        Success (10.00ms avg)
+
+3. Performing Traceroute to 1.1.1.1...
+
+Tracing route to 1.1.1.1 over a maximum of 15 hops
+
+1    <1 ms    <1 ms    <1 ms  192.168.1.1
+2     1 ms     1 ms     1 ms  172.17.1.207
+3     3 ms     3 ms     3 ms  159.146.113.153
+4     1 ms     1 ms     1 ms  10.170.3.190
+5     4 ms     *        *     159.146.113.113
+6     1 ms     1 ms     1 ms  193.192.103.98
+7     2 ms     2 ms     2 ms  159.146.3.6
+8     1 ms     1 ms     1 ms  1.1.1.1
+
+Trace complete.
+
+--- Troubleshooting Complete ---

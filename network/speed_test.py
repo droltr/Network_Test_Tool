@@ -118,12 +118,17 @@ class SpeedTester:
         """Create a progress callback for download/upload operations."""
         if not main_callback:
             return None
+        
+        last_progress = [start_progress]
             
         def callback(i, request_count, **kwargs):
             if not self.is_testing:
                 return
             progress = start_progress + int((i / request_count) * (end_progress - start_progress))
-            main_callback(min(progress, end_progress), message)
+            # Only update if progress has changed significantly (at least 5% difference)
+            if abs(progress - last_progress[0]) >= 5:
+                main_callback(min(progress, end_progress), message)
+                last_progress[0] = progress
         
         return callback
     

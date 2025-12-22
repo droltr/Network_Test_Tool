@@ -17,7 +17,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Network Diagnostic Tools")
-        self.setGeometry(100, 100, 1200, 800)
+        self.setGeometry(100, 100, 1400, 900)
+        self.setMinimumSize(1200, 800)
         self.create_menu_bar()
         self.setup_ui()
         self.apply_theme()
@@ -27,6 +28,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         
         layout = QVBoxLayout(central_widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         
         # Header
         header = self.create_header()
@@ -39,19 +42,19 @@ class MainWindow(QMainWindow):
         # Add tabs
         self.status_widget = NetworkStatusWidget()
         self.status_widget.overall_status_update.connect(self.update_overall_status)
-        self.tab_widget.addTab(self.status_widget, "🌐 Network Status")
+        self.tab_widget.addTab(self.status_widget, "Network Status")
         
         self.ping_widget = PingTestWidget()
-        self.tab_widget.addTab(self.ping_widget, "📡 Ping Test")
+        self.tab_widget.addTab(self.ping_widget, "Ping Test")
         
         self.port_widget = PortScannerWidget()
-        self.tab_widget.addTab(self.port_widget, "🔍 Port Scanner")
+        self.tab_widget.addTab(self.port_widget, "Port Scanner")
         
         self.speed_widget = SpeedTestWidget()
-        self.tab_widget.addTab(self.speed_widget, "⚡ Speed Test")
+        self.tab_widget.addTab(self.speed_widget, "Speed Test")
 
         self.auto_test_widget = AutoTestWidget()
-        self.tab_widget.addTab(self.auto_test_widget, "🤖 Automated Test")
+        self.tab_widget.addTab(self.auto_test_widget, "Troubleshooter")
         
         layout.addWidget(self.tab_widget)
         
@@ -61,44 +64,53 @@ class MainWindow(QMainWindow):
         
     def create_header(self):
         header_frame = QFrame()
-        header_frame.setFixedHeight(80)
+        header_frame.setFixedHeight(60)
         header_frame.setObjectName("headerFrame")
         
         layout = QHBoxLayout(header_frame)
+        layout.setContentsMargins(25, 0, 25, 0)
         
-        # Title
+        # Left: Title
+        left_layout = QVBoxLayout()
+        left_layout.setSpacing(0)
         title = QLabel("Network Diagnostic Tools")
         title.setObjectName("titleLabel")
-        title.setFont(QFont("Arial", 24, QFont.Bold))
+        title.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        left_layout.addWidget(title)
         
-        # Status indicator
-        self.status_label = QLabel("Ready")
-        self.status_label.setObjectName("statusLabel")
+        # Right: Round status indicator
+        status_layout = QHBoxLayout()
+        status_layout.setSpacing(10)
         
-        layout.addWidget(title)
+        self.status_text = QLabel("Offline")
+        self.status_text.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        self.status_text.setStyleSheet("color: #e06c75;")
+        
+        self.status_indicator = QLabel("●")
+        self.status_indicator.setObjectName("statusIndicator")
+        self.status_indicator.setFont(QFont("Segoe UI", 32)) # Increased size
+        self.status_indicator.setStyleSheet("color: #e06c75;")  # Red by default
+        
+        status_layout.addWidget(self.status_text)
+        status_layout.addWidget(self.status_indicator)
+        
+        layout.addLayout(left_layout)
         layout.addStretch()
-        layout.addWidget(self.status_label)
+        layout.addLayout(status_layout)
         
         return header_frame
         
     def create_footer(self):
         footer_frame = QFrame()
-        footer_frame.setFixedHeight(30)
+        footer_frame.setFixedHeight(35)
         footer_frame.setObjectName("footerFrame")
         
         layout = QHBoxLayout(footer_frame)
+        layout.setContentsMargins(25, 0, 25, 0)
         
-        footer_label = QLabel("Network Tools v1.0 - Modern Network Diagnostics")
-        footer_label.setObjectName("footerLabel")
-
-        exit_button = QPushButton("Exit")
-        exit_button.setFixedSize(100, 30) # Set a fixed size
-        exit_button.setStyleSheet("background-color: #BF616A; color: white; border-radius: 5px;") # Add some styling
-        exit_button.clicked.connect(self.close)
+        # Removed footer label as requested
         
-        layout.addWidget(footer_label)
         layout.addStretch()
-        layout.addWidget(exit_button)
         
         return footer_frame
         
@@ -110,12 +122,15 @@ class MainWindow(QMainWindow):
         self.status_label.setText(message)
 
     def update_overall_status(self, is_ok):
+        # This updates the round indicator based on internet connectivity
         if is_ok:
-            self.status_label.setText("OK")
-            self.status_label.setStyleSheet("color: #A3BE8C;") # Green
+            self.status_indicator.setStyleSheet("color: #98c379;")  # Green
+            self.status_text.setText("Online")
+            self.status_text.setStyleSheet("color: #98c379;")
         else:
-            self.status_label.setText("Problem Detected")
-            self.status_label.setStyleSheet("color: #BF616A;") # Red
+            self.status_indicator.setStyleSheet("color: #e06c75;")  # Red
+            self.status_text.setText("Offline")
+            self.status_text.setStyleSheet("color: #e06c75;")
 
     def closeEvent(self, event):
         # Call cleanup for all widgets that might have running threads or timers
@@ -128,15 +143,23 @@ class MainWindow(QMainWindow):
 
     def create_menu_bar(self):
         menu_bar = self.menuBar()
-        menu_bar.setStyleSheet("QMenuBar::item { padding-right: 20px; } QMenuBar::item:last { margin-left: auto; }")
 
+        # File menu
+        file_menu = menu_bar.addMenu("File")
+        
+        exit_action = QAction("Exit", self)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+        # Help menu
         help_menu = menu_bar.addMenu("Help")
 
         about_action = QAction("About", self)
         about_action.triggered.connect(self.show_about_dialog)
         help_menu.addAction(about_action)
 
-        github_action = QAction("GitHub", self)
+        github_action = QAction("GitHub Repository", self)
         github_action.triggered.connect(self.open_github_link)
         help_menu.addAction(github_action)
 

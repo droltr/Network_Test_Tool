@@ -67,21 +67,26 @@ class PortScannerWidget(QWidget):
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 15, 20, 15)
         
         # Header
         header = QLabel("Port Scanner")
-        header.setFont(QFont("Arial", 16, QFont.Bold))
+        header.setFont(QFont("Segoe UI", 14, QFont.Bold))
         layout.addWidget(header)
         
         # Input group
         input_group = QGroupBox("Scan Settings")
         input_layout = QGridLayout(input_group)
+        input_layout.setSpacing(10)
+        input_layout.setContentsMargins(15, 20, 15, 15)
         
         # Host input
         input_layout.addWidget(QLabel("Target Host:"), 0, 0)
         self.host_input = QLineEdit()
         self.host_input.setPlaceholderText("Enter IP address or hostname")
         self.host_input.setText("127.0.0.1")
+        self.host_input.setMinimumHeight(35)
         input_layout.addWidget(self.host_input, 0, 1)
         
         # Port preset selection
@@ -90,6 +95,7 @@ class PortScannerWidget(QWidget):
         self.port_presets = PortScanner.get_common_ports()
         self.preset_combo.addItems(list(self.port_presets.keys()))
         self.preset_combo.currentTextChanged.connect(self.on_preset_changed)
+        self.preset_combo.setMinimumHeight(35)
         input_layout.addWidget(self.preset_combo, 1, 1)
         
         # Custom port range
@@ -98,9 +104,11 @@ class PortScannerWidget(QWidget):
         self.port_start = QLineEdit()
         self.port_start.setPlaceholderText("Start")
         self.port_start.setText("1")
+        self.port_start.setMinimumHeight(35)
         self.port_end = QLineEdit()
         self.port_end.setPlaceholderText("End")
         self.port_end.setText("1000")
+        self.port_end.setMinimumHeight(35)
         port_layout.addWidget(self.port_start)
         port_layout.addWidget(QLabel("to"))
         port_layout.addWidget(self.port_end)
@@ -115,19 +123,24 @@ class PortScannerWidget(QWidget):
         self.timeout_input = QLineEdit()
         self.timeout_input.setText("1.0")
         self.timeout_input.setPlaceholderText("1.0")
+        self.timeout_input.setMinimumHeight(35)
         input_layout.addWidget(self.timeout_input, 3, 1)
         
         # Start button
-        self.start_btn = QPushButton("Start Port Scan")
+        self.start_btn = QPushButton("Start Scan")
+        self.start_btn.setFixedHeight(40)
         self.start_btn.clicked.connect(self.start_scan)
-        self.stop_btn = QPushButton("Stop Scan")
+        self.stop_btn = QPushButton("Stop")
+        self.stop_btn.setFixedHeight(40)
         self.stop_btn.clicked.connect(self.stop_scan)
         self.stop_btn.setEnabled(False)
-        self.export_btn = QPushButton("Export Log")
+        self.export_btn = QPushButton("Export")
+        self.export_btn.setFixedHeight(40)
         self.export_btn.clicked.connect(self.export_log)
-        self.export_btn.setEnabled(False) # Disabled until scan is complete
+        self.export_btn.setEnabled(False)
         
         button_layout = QHBoxLayout()
+        button_layout.setSpacing(10)
         button_layout.addWidget(self.start_btn)
         button_layout.addWidget(self.stop_btn)
         button_layout.addWidget(self.export_btn)
@@ -140,6 +153,7 @@ class PortScannerWidget(QWidget):
         # Progress
         progress_layout = QHBoxLayout()
         self.progress_bar = QProgressBar()
+        self.progress_bar.setFixedHeight(25)
         self.progress_bar.setVisible(False)
         self.progress_label = QLabel("")
         progress_layout.addWidget(self.progress_bar)
@@ -148,21 +162,26 @@ class PortScannerWidget(QWidget):
         
         # Results
         results_layout = QHBoxLayout()
+        results_layout.setSpacing(15)
         
         # Open ports list
         open_ports_group = QGroupBox("Open Ports")
         open_ports_layout = QVBoxLayout(open_ports_group)
+        open_ports_layout.setContentsMargins(15, 20, 15, 15)
         self.open_ports_list = QListWidget()
+        self.open_ports_list.setMinimumHeight(200)
         open_ports_layout.addWidget(self.open_ports_list)
-        results_layout.addWidget(open_ports_group)
+        results_layout.addWidget(open_ports_group, 1)
         
         # Detailed results
         details_group = QGroupBox("Scan Results")
         details_layout = QVBoxLayout(details_group)
+        details_layout.setContentsMargins(15, 20, 15, 15)
         self.results_text = QTextEdit()
+        self.results_text.setMinimumHeight(200)
         self.results_text.setPlaceholderText("Scan results will appear here...")
         details_layout.addWidget(self.results_text)
-        results_layout.addWidget(details_group)
+        results_layout.addWidget(details_group, 1)
         
         layout.addLayout(results_layout)
         
@@ -259,7 +278,7 @@ class PortScannerWidget(QWidget):
             
             item = QListWidgetItem(item_text)
             from PyQt5.QtGui import QColor, QBrush
-            item.setForeground(QBrush(QColor("#A3BE8C")))
+            item.setForeground(QBrush(QColor("#98c379")))
             font = item.font()
             font.setBold(True)
             item.setFont(font)

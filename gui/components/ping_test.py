@@ -44,21 +44,26 @@ class PingTestWidget(QWidget):
         
     def setup_ui(self):
         layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 15, 20, 15)
         
         # Header
         header = QLabel("Ping Test")
-        header.setFont(QFont("Arial", 16, QFont.Bold))
+        header.setFont(QFont("Segoe UI", 14, QFont.Bold))
         layout.addWidget(header)
         
         # Input group
         input_group = QGroupBox("Ping Settings")
         input_layout = QGridLayout(input_group)
+        input_layout.setSpacing(10)
+        input_layout.setContentsMargins(15, 20, 15, 15)
         
         # Host input
         input_layout.addWidget(QLabel("Target Host:"), 0, 0)
         self.host_input = QLineEdit()
         self.host_input.setPlaceholderText("Enter IP address or hostname (e.g., google.com)")
         self.host_input.setText("8.8.8.8")
+        self.host_input.setMinimumHeight(35)
         input_layout.addWidget(self.host_input, 0, 1)
         
         # Count input
@@ -67,10 +72,12 @@ class PingTestWidget(QWidget):
         self.count_input.setMinimum(1)
         self.count_input.setMaximum(100)
         self.count_input.setValue(4)
+        self.count_input.setMinimumHeight(35)
         input_layout.addWidget(self.count_input, 1, 1)
         
         # Start button
         self.start_btn = QPushButton("Start Ping Test")
+        self.start_btn.setFixedHeight(40)
         self.start_btn.clicked.connect(self.start_ping)
         input_layout.addWidget(self.start_btn, 2, 0, 1, 2)
         
@@ -78,21 +85,28 @@ class PingTestWidget(QWidget):
         
         # Progress bar
         self.progress_bar = QProgressBar()
+        self.progress_bar.setFixedHeight(25)
         self.progress_bar.setVisible(False)
         layout.addWidget(self.progress_bar)
         
         # Results group
         results_group = QGroupBox("Results")
         results_layout = QVBoxLayout(results_group)
+        results_layout.setContentsMargins(15, 20, 15, 15)
         
         # Statistics
         stats_layout = QGridLayout()
+        stats_layout.setSpacing(15)
         self.sent_label = QLabel("Sent: 0")
         self.received_label = QLabel("Received: 0")
         self.lost_label = QLabel("Lost: 0")
         self.min_label = QLabel("Min: 0 ms")
         self.max_label = QLabel("Max: 0 ms")
         self.avg_label = QLabel("Avg: 0 ms")
+        
+        for label in [self.sent_label, self.received_label, self.lost_label, 
+                      self.min_label, self.max_label, self.avg_label]:
+            label.setFont(QFont("Segoe UI", 10, QFont.Bold))
         
         stats_layout.addWidget(self.sent_label, 0, 0)
         stats_layout.addWidget(self.received_label, 0, 1)
@@ -105,7 +119,7 @@ class PingTestWidget(QWidget):
         
         # Detailed results
         self.results_text = QTextEdit()
-        self.results_text.setMaximumHeight(200)
+        self.results_text.setMinimumHeight(200)
         self.results_text.setPlaceholderText("Ping results will appear here...")
         results_layout.addWidget(self.results_text)
         

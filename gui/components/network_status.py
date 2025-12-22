@@ -1,8 +1,8 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                             QGroupBox, QGridLayout, QPushButton, QProgressBar,
-                            QListWidget, QListWidgetItem, QSplitter, QMessageBox)
+                            QListWidget, QListWidgetItem, QSplitter, QMessageBox,
+                            QFrame, QScrollArea)
 from PyQt5.QtCore import QThread, pyqtSignal, QTimer, Qt
-from PyQt5.QtGui import QFont
 from PyQt5.QtGui import QFont
 from network.detector import NetworkDetector
 import socket
@@ -27,6 +27,104 @@ class NetworkInfoThread(QThread):
             logging.error(f"NetworkInfoThread.run - Error: {e}")
             self.info_ready.emit({"error": str(e)})
 
+class AdapterCard(QFrame):
+    """Custom card widget for each network adapter"""
+    def __init__(self, adapter_data, gateway_list, dns_list, parent=None):
+        super().__init__(parent)
+        self.adapter_data = adapter_data
+        self.setup_ui(gateway_list, dns_list)
+        
+    def setup_ui(self, gateway_list, dns_list):
+        self.setObjectName("adapterCard")
+        self.setFrameShape(QFrame.StyledPanel)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 15, 20, 15)
+        layout.setSpacing(8)
+        
+        name = self.adapter_data.get('name', 'Unknown')
+        ipv4 = self.adapter_data.get('ipv4', 'N/A')
+        mac = self.adapter_data.get('mac', 'N/A')
+        
+        is_active = ipv4 != 'N/A' and not ipv4.startswith('127.') and not ipv4.startswith('169.')
+        
+        # Header row: Name and Status
+        header_layout = QHBoxLayout()
+        name_label = QLabel(name)
+        name_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        name_label.setStyleSheet("color: #abb2bf;")
+        
+        status_label = QLabel()
+        if is_active:
+            status_label.setText("● Active")
+            status_label.setStyleSheet("color: #98c379; font-weight: 600;")
+        else:
+            status_label.setText("○ Inactive")
+            status_label.setStyleSheet("color: #5c6370; font-weight: 600;")
+        
+        header_layout.addWidget(name_label)
+        header_layout.addStretch()
+        header_layout.addWidget(status_label)
+        layout.addLayout(header_layout)
+        
+        # Separator line
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setStyleSheet("background-color: #3e4451;")
+        line.setFixedHeight(1)
+        layout.addWidget(line)
+        
+        # Details grid
+        details_layout = QGridLayout()
+        details_layout.setSpacing(8)
+        details_layout.setColumnStretch(1, 1)
+        
+        row = 0
+        
+        # IP Address
+        if is_active:
+            ip_title = QLabel("IP Address:")
+            ip_title.setStyleSheet("color: #5c6370; font-size: 9pt;")
+            ip_value = QLabel(ipv4)
+            ip_value.setStyleSheet("color: #61afef; font-size: 10pt; font-weight: 600;")
+            ip_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            details_layout.addWidget(ip_title, row, 0)
+            details_layout.addWidget(ip_value, row, 1)
+            row += 1
+        
+        # MAC Address
+        mac_title = QLabel("MAC Address:")
+        mac_title.setStyleSheet("color: #5c6370; font-size: 9pt;")
+        mac_value = QLabel(mac)
+        mac_value.setStyleSheet("color: #abb2bf; font-size: 9pt;")
+        mac_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        details_layout.addWidget(mac_title, row, 0)
+        details_layout.addWidget(mac_value, row, 1)
+        row += 1
+        
+        # Gateway (only for active adapters)
+        if is_active and gateway_list:
+            gateway_title = QLabel("Gateway:")
+            gateway_title.setStyleSheet("color: #5c6370; font-size: 9pt;")
+            gateway_value = QLabel(", ".join(gateway_list[:2]))
+            gateway_value.setStyleSheet("color: #abb2bf; font-size: 9pt;")
+            gateway_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            details_layout.addWidget(gateway_title, row, 0)
+            details_layout.addWidget(gateway_value, row, 1)
+            row += 1
+        
+        # DNS (only for active adapters)
+        if is_active and dns_list:
+            dns_title = QLabel("DNS Servers:")
+            dns_title.setStyleSheet("color: #5c6370; font-size: 9pt;")
+            dns_value = QLabel(", ".join(dns_list[:2]))
+            dns_value.setStyleSheet("color: #abb2bf; font-size: 9pt;")
+            dns_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            details_layout.addWidget(dns_title, row, 0)
+            details_layout.addWidget(dns_value, row, 1)
+        
+        layout.addLayout(details_layout)
+
 class NetworkStatusWidget(QWidget):
     overall_status_update = pyqtSignal(bool)
 
@@ -50,182 +148,133 @@ class NetworkStatusWidget(QWidget):
 
     def _update_ui_with_info(self, info):
         logging.debug(f"_update_ui_with_info - Received info: {info}")
+        
+        # Clear existing cards
+        while self.cards_layout.count() > 1:  # Keep the stretch at the end
+            item = self.cards_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
         if info.get('error'):
-            self.hostname_label.setText(f"Error: {info['error']}")
-            self.ip_label.setText("N/A")
-            self.gateway_label.setText("N/A")
-            self.dns_label.setText("N/A")
-            self.mac_label.setText("N/A")
-            self.connection_list.clear()
-            self.connection_list.addItem(QListWidgetItem(f"Error: {info['error']}"))
-            self.adapters_list.clear()
+            self.hostname_label.setText(f"Computer: Error")
+            error_label = QLabel(f"Error: {info['error']}")
+            error_label.setStyleSheet("color: #e06c75; padding: 20px;")
+            self.cards_layout.insertWidget(0, error_label)
             self.overall_status_update.emit(False)
             return
 
         # Update hostname
-        self.hostname_label.setText(info.get('hostname', 'Unknown'))
+        self.hostname_label.setText(f"Computer: {info.get('hostname', 'Unknown')}")
 
-        # Update IP addresses and MAC addresses per interface
-        ip_mac_text = []
-        mac_text = []
-        logging.debug(f"Interfaces: {info.get('interfaces', [])}")
-        for interface in info.get('interfaces', []):
-            name = interface.get('name', 'Unknown')
+        # Get gateway and DNS info
+        gateway_list = info.get('gateway', [])
+        dns_list = info.get('dns', [])
+        interfaces = info.get('interfaces', [])
+        
+        logging.debug(f"Interfaces: {interfaces}")
+        
+        # Sort adapters: Active first, then inactive
+        active_adapters = []
+        inactive_adapters = []
+        
+        for interface in interfaces:
             ipv4 = interface.get('ipv4', 'N/A')
-            mac = interface.get('mac', 'N/A')
-            if ipv4 != 'N/A' and not ipv4.startswith('127.') and not ipv4.startswith('169.'):  # Exclude loopback and APIPA
-                ip_mac_text.append(f"<b>{name}</b> - IP: {ipv4}")
-                mac_text.append(f"<b>{name}</b> - {mac}")
-        self.ip_label.setText("<br>".join(ip_mac_text) if ip_mac_text else 'No active network connections')
-        self.mac_label.setText("<br>".join(mac_text) if mac_text else 'No active network connections')
-
-        # Update gateway and DNS info
-        self.gateway_label.setText("<br>".join(info.get('gateway', ['Unknown'])))
-        self.dns_label.setText("<br>".join(info.get('dns', ['Unknown'])))
-        
-        # Update connection list
-        self.connection_list.clear()
-        connections = info.get('connections', [])
-        logging.debug(f"Connection status update - connections: {connections}")
-        
-        if not connections:
-            # Add default item if no connections are found
-            item = QListWidgetItem("No connection data available")
-            self.connection_list.addItem(item)
-            return
+            is_active = ipv4 != 'N/A' and not ipv4.startswith('127.') and not ipv4.startswith('169.')
             
-        for conn in connections:
-            try:
-                item = QListWidgetItem()
-                self.connection_list.addItem(item)
-
-                label = QLabel()
-                status = conn.get('status', 'Unknown')
-                description = conn.get('description', 'Unknown')
-
-                if status in ['Disconnected', 'Failed', 'Error']:
-                    label.setText(f"<b>{description}:</b> <font color='#BF616A'>{status}</font>")
-                elif status in ['Connected', 'Working']:
-                    label.setText(f"<b>{description}:</b> <font color='#A3BE8C'>{status}</font>")
-                else:
-                    label.setText(f"<b>{description}:</b> <font color='#EBCB8B'>{status}</font>")
-                
-                
-                self.connection_list.setItemWidget(item, label)
-                
-                logging.debug(f"Added connection status: {description}={status}")
-            except Exception as e:
-                logging.error(f"Error adding connection to UI: {str(e)}")
-                continue
-
-        # Check overall status and emit signal
-        all_ok = all(conn['status'] in ['Connected', 'Working'] for conn in connections)
-        self.overall_status_update.emit(all_ok)
-
-        # Update adapters list
-        self.adapters_list.clear()
-        for iface in info.get('interfaces', []):
-            item = QListWidgetItem(f"{iface['name']}")
-            item.setData(32, iface) # 32 is the UserRole (Qt.UserRole)
-            self.adapters_list.addItem(item)
-
-    def set_selected_adapter_state(self, state):
-        selected_items = self.adapters_list.selectedItems()
-        if not selected_items:
-            QMessageBox.warning(self, "No Selection", "Please select a network adapter from the list.")
-            return
-
-        for item in selected_items:
-            iface_info = item.data(32) # 32 is the UserRole (Qt.UserRole)
-            adapter_name = iface_info['name']
-            success, message = self.detector.set_adapter_state(adapter_name, state)
-            if success:
-                QMessageBox.information(self, "Success", message)
-                self.refresh_info() # Refresh to show updated status
+            if is_active:
+                active_adapters.append(interface)
             else:
-                QMessageBox.critical(self, "Error", message)
+                inactive_adapters.append(interface)
+        
+        # Sort each group alphabetically by name
+        active_adapters.sort(key=lambda x: x.get('name', ''))
+        inactive_adapters.sort(key=lambda x: x.get('name', ''))
+        
+        # Combine: active first, then inactive
+        sorted_interfaces = active_adapters + inactive_adapters
+        
+        # Create card for each adapter
+        for interface in sorted_interfaces:
+            card = AdapterCard(interface, gateway_list, dns_list)
+            self.cards_layout.insertWidget(self.cards_layout.count() - 1, card)
+
+        # Check overall status
+        connections = info.get('connections', [])
+        all_ok = all(conn['status'] in ['Connected', 'Working'] for conn in connections) if connections else False
+        self.overall_status_update.emit(all_ok)
+    
+    def set_selected_adapter_state(self, state):
+        # This feature requires selecting from cards - not implemented in card view
+        # Could add click-to-select functionality if needed
+        QMessageBox.information(self, "Info", "Adapter enable/disable controls are not available in card view.\nUse Windows Network Settings for adapter management.")
+        pass
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
+        layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 0, 0)
         
-        # Header
-        header = QLabel("Network Status & Information")
-        header.setFont(QFont("Arial", 16, QFont.Bold))
-        layout.addWidget(header)
+        # Header with computer name
+        header_frame = QFrame()
+        header_frame.setObjectName("statusHeader")
+        header_layout = QHBoxLayout(header_frame)
+        header_layout.setContentsMargins(25, 15, 25, 15)
         
-        # Main content
-        content_layout = QHBoxLayout()
+        title = QLabel("Network Adapters")
+        title.setFont(QFont("Segoe UI", 14, QFont.Bold))
         
-        # Left side - Network info
-        left_group = QGroupBox("Network Information")
-        left_layout = QGridLayout(left_group)
+        self.hostname_label = QLabel("Computer: Loading...")
+        self.hostname_label.setFont(QFont("Segoe UI", 10))
+        self.hostname_label.setStyleSheet("color: #5c6370;")
         
-        self.hostname_label = QLabel("Loading...")
-        self.ip_label = QLabel("Loading...")
-        self.gateway_label = QLabel("Loading...")
-        self.dns_label = QLabel("Loading...")
-        self.mac_label = QLabel("Loading...")
+        header_layout.addWidget(title)
+        header_layout.addStretch()
+        header_layout.addWidget(self.hostname_label)
         
-        left_layout.addWidget(QLabel("Hostname:"), 0, 0)
-        left_layout.addWidget(self.hostname_label, 0, 1)
-        left_layout.addWidget(QLabel("IP Address:"), 1, 0)
-        left_layout.addWidget(self.ip_label, 1, 1, 1, 2) # Span 2 columns
-        left_layout.addWidget(QLabel("Gateway:"), 2, 0)
-        left_layout.addWidget(self.gateway_label, 2, 1, 1, 2) # Span 2 columns
-        left_layout.addWidget(QLabel("DNS Server:"), 3, 0)
-        left_layout.addWidget(self.dns_label, 3, 1, 1, 2) # Span 2 columns
-        left_layout.addWidget(QLabel("MAC Address:"), 4, 0)
-        left_layout.addWidget(self.mac_label, 4, 1, 1, 2) # Span 2 columns
+        layout.addWidget(header_frame)
         
-        content_layout.addWidget(left_group)
+        # Scroll area for adapter cards
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         
-        # Right side - Connection status & Adapters
-        right_splitter = QSplitter()
-
-        # Connection Status Group
-        right_group = QGroupBox("Connection Status")
-        right_layout = QVBoxLayout(right_group)
-        self.connection_list = QListWidget()
-        self.connection_list.setMinimumHeight(100) # Ensure it has some height
-        right_layout.addWidget(self.connection_list)
-        right_splitter.addWidget(right_group)
-        right_splitter.setStretchFactor(0, 1) # Give connection status group a stretch factor
-        right_splitter.setStretchFactor(1, 1) # Give adapters group a stretch factor
-
-        # Adapters Group
-        adapters_group = QGroupBox("Network Adapters (Administrator privileges required)")
-        adapters_layout = QVBoxLayout(adapters_group)
-        self.adapters_list = QListWidget()
-        adapters_layout.addWidget(self.adapters_list)
+        scroll_content = QWidget()
+        self.cards_layout = QVBoxLayout(scroll_content)
+        self.cards_layout.setSpacing(12)
+        self.cards_layout.setContentsMargins(20, 20, 20, 20)
+        self.cards_layout.addStretch()
         
-        adapter_buttons_layout = QHBoxLayout()
-        self.enable_adapter_btn = QPushButton("Enable Selected")
-        self.enable_adapter_btn.clicked.connect(lambda: self.set_selected_adapter_state(True))
-        self.disable_adapter_btn = QPushButton("Disable Selected")
-        self.disable_adapter_btn.clicked.connect(lambda: self.set_selected_adapter_state(False))
-        adapter_buttons_layout.addWidget(self.enable_adapter_btn)
-        adapter_buttons_layout.addWidget(self.disable_adapter_btn)
-        adapters_layout.addLayout(adapter_buttons_layout)
-        right_splitter.addWidget(adapters_group)
-
-        content_layout.addWidget(right_splitter)
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll)
         
-        layout.addLayout(content_layout)
+        # Bottom controls
+        controls_frame = QFrame()
+        controls_frame.setObjectName("statusFooter")
+        controls_layout = QHBoxLayout(controls_frame)
+        controls_layout.setContentsMargins(25, 15, 25, 15)
+        controls_layout.setSpacing(10)
         
-        # Controls
-        controls_layout = QHBoxLayout()
-        self.refresh_btn = QPushButton("Refresh Information")
+        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.setFixedSize(100, 35)
         self.refresh_btn.clicked.connect(self.refresh_info)
         
         self.auto_refresh_btn = QPushButton("Auto Refresh: OFF")
+        self.auto_refresh_btn.setFixedSize(150, 35)
         self.auto_refresh_btn.clicked.connect(self.toggle_auto_refresh)
+        
+        admin_note = QLabel("⚠ Adapter controls require administrator privileges")
+        admin_note.setStyleSheet("color: #5c6370; font-size: 8pt;")
         
         controls_layout.addWidget(self.refresh_btn)
         controls_layout.addWidget(self.auto_refresh_btn)
         controls_layout.addStretch()
+        controls_layout.addWidget(admin_note)
         
-        layout.addLayout(controls_layout)
-        layout.addStretch()
+        layout.addWidget(controls_frame)
+        
+        # Store reference to selected adapter
+        self.selected_adapter = None
         
     def setup_timer(self):
         self.timer = QTimer(self)
@@ -261,7 +310,7 @@ class NetworkStatusWidget(QWidget):
     def toggle_auto_refresh(self):
         self.auto_refresh = not self.auto_refresh
         if self.auto_refresh:
-            self.timer.start(5000)  # Refresh every 5 seconds
+            self.timer.start(10000)  # Refresh every 10 seconds
             self.auto_refresh_btn.setText("Auto Refresh: ON")
         else:
             self.timer.stop()
