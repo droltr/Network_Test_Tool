@@ -159,16 +159,9 @@ class MainWindow(QMainWindow):
         about_action.triggered.connect(self.show_about_dialog)
         help_menu.addAction(about_action)
 
-        github_action = QAction("GitHub Repository", self)
-        github_action.triggered.connect(self.open_github_link)
-        help_menu.addAction(github_action)
-
     def show_about_dialog(self):
         QMessageBox.about(self, "About Network Test Tool",
                           """<b>Network Test Tool v0.5</b>
                           <p>A modern network diagnostic and troubleshooting utility.</p>
                           <p>Developed by droltr.</p>
                           <p><a href='https://github.com/droltr/Network_Test_Tool'>GitHub Repository</a></p>""")
-
-    def open_github_link(self):
-        webbrowser.open("https://github.com/droltr/Network_Test_Tool")
