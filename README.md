@@ -1,7 +1,6 @@
 # Network Test Tool
 
 **Version:** 0.5  
-**GitHub:** [https://github.com/droltr/Network_Test_Tool](https://github.com/droltr/Network_Test_Tool)
 
 A modern, comprehensive network diagnostic and troubleshooting utility built with Python and PyQt5.
 
