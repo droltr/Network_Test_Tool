@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] - 2024-12-22
+## [0.5.0] - 2024-12-22
 
 ### Added
 - **Network Status:** Real-time monitoring of adapters with card layout.
@@ -20,3 +20,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated UI to be cleaner and more professional.
 - Removed Speed Test from automated troubleshooter.
 - Improved Speed Test reliability (fixed 403 Forbidden error).
+- Updated documentation with GitHub links.

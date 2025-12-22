@@ -1,7 +1,8 @@
 # Network Test Tool - Coding Guidelines & User Requirements
 
 ## Project Overview
-Network Test Tool - A comprehensive network diagnostic application built with PyQt5 for Windows.
+Network Test Tool (v0.5) - A comprehensive network diagnostic application built with PyQt5 for Windows.
+GitHub: https://github.com/droltr/Network_Test_Tool
 
 ## User Requirements & Design Decisions
 

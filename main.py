@@ -1,5 +1,12 @@
 import sys
 import os
+
+"""
+Network Test Tool
+Version: 0.5
+GitHub: https://github.com/droltr/Network_Test_Tool
+"""
+
 # Add the src directory to Python path
 src_path = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, src_path)

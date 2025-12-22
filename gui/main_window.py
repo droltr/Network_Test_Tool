@@ -165,9 +165,10 @@ class MainWindow(QMainWindow):
 
     def show_about_dialog(self):
         QMessageBox.about(self, "About Network Test Tool",
-                          """<b>Network Test Tool</b>
+                          """<b>Network Test Tool v0.5</b>
                           <p>A modern network diagnostic and troubleshooting utility.</p>
-                          <p>Developed by droltr.</p>""")
+                          <p>Developed by droltr.</p>
+                          <p><a href='https://github.com/droltr/Network_Test_Tool'>GitHub Repository</a></p>""")
 
     def open_github_link(self):
-        webbrowser.open("https://github.com/droltr")
+        webbrowser.open("https://github.com/droltr/Network_Test_Tool")
