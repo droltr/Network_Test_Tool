@@ -1,7 +1,7 @@
-# Network Tools - Coding Guidelines & User Requirements
+# Network Test Tool - Coding Guidelines & User Requirements
 
 ## Project Overview
-Network Diagnostic Tools - A comprehensive network diagnostic application built with PyQt5 for Windows.
+Network Test Tool - A comprehensive network diagnostic application built with PyQt5 for Windows.
 
 ## User Requirements & Design Decisions
 

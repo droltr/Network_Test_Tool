@@ -16,7 +16,7 @@ from .styles.modern_theme import ModernTheme
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Network Diagnostic Tools")
+        self.setWindowTitle("Network Test Tool")
         self.setGeometry(100, 100, 1400, 900)
         self.setMinimumSize(1200, 800)
         self.create_menu_bar()
@@ -73,7 +73,7 @@ class MainWindow(QMainWindow):
         # Left: Title
         left_layout = QVBoxLayout()
         left_layout.setSpacing(0)
-        title = QLabel("Network Diagnostic Tools")
+        title = QLabel("Network Test Tool")
         title.setObjectName("titleLabel")
         title.setFont(QFont("Segoe UI", 16, QFont.Bold))
         left_layout.addWidget(title)
@@ -164,8 +164,8 @@ class MainWindow(QMainWindow):
         help_menu.addAction(github_action)
 
     def show_about_dialog(self):
-        QMessageBox.about(self, "About Network Diagnostic Tools",
-                          """<b>Network Diagnostic Tools v1.0</b>
+        QMessageBox.about(self, "About Network Test Tool",
+                          """<b>Network Test Tool</b>
                           <p>A modern network diagnostic and troubleshooting utility.</p>
                           <p>Developed by droltr.</p>""")
 

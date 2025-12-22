@@ -1,4 +1,4 @@
-# Network Diagnostic Tools
+# Network Test Tool
 
 A modern, comprehensive network diagnostic and troubleshooting utility built with Python and PyQt5.
 
@@ -15,8 +15,8 @@ A modern, comprehensive network diagnostic and troubleshooting utility built wit
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/yourusername/network-diagnostic-tools.git
-    cd network-diagnostic-tools
+    git clone https://github.com/yourusername/Network_Test_Tool.git
+    cd Network_Test_Tool
     ```
 
 2.  **Install dependencies:**
