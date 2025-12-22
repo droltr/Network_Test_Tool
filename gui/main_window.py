@@ -70,14 +70,6 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(header_frame)
         layout.setContentsMargins(25, 0, 25, 0)
         
-        # Left: Title
-        left_layout = QVBoxLayout()
-        left_layout.setSpacing(0)
-        title = QLabel("Network Test Tool")
-        title.setObjectName("titleLabel")
-        title.setFont(QFont("Segoe UI", 16, QFont.Bold))
-        left_layout.addWidget(title)
-        
         # Right: Round status indicator
         status_layout = QHBoxLayout()
         status_layout.setSpacing(10)
@@ -94,7 +86,6 @@ class MainWindow(QMainWindow):
         status_layout.addWidget(self.status_text)
         status_layout.addWidget(self.status_indicator)
         
-        layout.addLayout(left_layout)
         layout.addStretch()
         layout.addLayout(status_layout)
         

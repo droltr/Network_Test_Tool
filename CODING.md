@@ -120,6 +120,7 @@ network_tools_Worked/
 - **General Style**: Modern, serious, and simple interface with pastel colors (Dark Theme).
 - **Header**:
   - Remove version number ("v1.0").
+  - Remove program name text (redundant with window title).
   - Status Indicator: Large round indicator with "Online" (Green) / "Offline" (Red) text.
 - **Footer**:
   - Remove "2024 Network Tools" copyright text.
