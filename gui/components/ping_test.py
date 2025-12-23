@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                             QGroupBox, QGridLayout, QPushButton, QLineEdit,
-                            QSpinBox, QTextEdit, QProgressBar, QCompleter)
+                            QSpinBox, QTextEdit, QProgressBar, QCompleter, QFileDialog)
 from PyQt5.QtCore import QThread, pyqtSignal, QTimer, QSettings
 from PyQt5.QtGui import QFont
 from network.ping import PingTester
@@ -75,11 +75,21 @@ class PingTestWidget(QWidget):
         self.count_input.setMinimumHeight(35)
         input_layout.addWidget(self.count_input, 1, 1)
         
-        # Start button
+        # Buttons
+        btn_layout = QHBoxLayout()
         self.start_btn = QPushButton("Start Ping Test")
         self.start_btn.setFixedHeight(40)
         self.start_btn.clicked.connect(self.start_ping)
-        input_layout.addWidget(self.start_btn, 2, 0, 1, 2)
+        
+        self.export_btn = QPushButton("Export Results")
+        self.export_btn.setFixedHeight(40)
+        self.export_btn.clicked.connect(self.export_log)
+        self.export_btn.setEnabled(False)
+        
+        btn_layout.addWidget(self.start_btn)
+        btn_layout.addWidget(self.export_btn)
+        
+        input_layout.addLayout(btn_layout, 2, 0, 1, 2)
         
         layout.addWidget(input_group)
         
@@ -139,6 +149,7 @@ class PingTestWidget(QWidget):
         count = self.count_input.value()
         
         self.start_btn.setEnabled(False)
+        self.export_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, count)
         self.progress_bar.setValue(0)
@@ -164,6 +175,7 @@ class PingTestWidget(QWidget):
         
     def on_ping_finished(self, result):
         self.start_btn.setEnabled(True)
+        self.export_btn.setEnabled(True)
         self.progress_bar.setVisible(False)
         
         if "error" in result:
@@ -188,3 +200,26 @@ class PingTestWidget(QWidget):
         self.results_text.append(f"\n--- Ping Test Complete ---")
         self.results_text.append(f"Host: {result.get('host', 'Unknown')}")
         self.results_text.append(f"Success Rate: {stats.get('success_rate', 0):.1f}%")
+
+    def export_log(self):
+        """Export the ping results to a text file."""
+        log_content = self.results_text.toPlainText()
+        if not log_content:
+            return
+
+        # Generate default filename with timestamp
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_filename = f"ping_test_results_{timestamp}.txt"
+
+        # Open file dialog
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save Log File", default_filename, "Text Files (*.txt);;All Files (*)", options=options)
+
+        if file_path:
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(log_content)
+            except Exception as e:
+                self.results_text.append(f"\nError saving log: {e}")

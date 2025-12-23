@@ -11,6 +11,8 @@ from .components.ping_test import PingTestWidget
 from .components.port_scanner import PortScannerWidget
 from .components.speed_test import SpeedTestWidget
 from .components.auto_test import AutoTestWidget
+from .components.trace_route import TraceRouteWidget
+from .components.advanced_tools import AdvancedWidget
 from .styles.modern_theme import ModernTheme
 
 class MainWindow(QMainWindow):
@@ -52,6 +54,12 @@ class MainWindow(QMainWindow):
         
         self.speed_widget = SpeedTestWidget()
         self.tab_widget.addTab(self.speed_widget, "Speed Test")
+
+        self.trace_widget = TraceRouteWidget()
+        self.tab_widget.addTab(self.trace_widget, "Trace Route")
+
+        self.advanced_widget = AdvancedWidget()
+        self.tab_widget.addTab(self.advanced_widget, "Advanced")
 
         self.auto_test_widget = AutoTestWidget()
         self.tab_widget.addTab(self.auto_test_widget, "Troubleshooter")
@@ -112,12 +120,16 @@ class MainWindow(QMainWindow):
     def update_status(self, message):
         self.status_label.setText(message)
 
-    def update_overall_status(self, is_ok):
+    def update_overall_status(self, status):
         # This updates the round indicator based on internet connectivity
-        if is_ok:
+        if status == "online":
             self.status_indicator.setStyleSheet("color: #98c379;")  # Green
             self.status_text.setText("Online")
             self.status_text.setStyleSheet("color: #98c379;")
+        elif status == "local":
+            self.status_indicator.setStyleSheet("color: #e5c07b;")  # Yellow
+            self.status_text.setText("Local Only")
+            self.status_text.setStyleSheet("color: #e5c07b;")
         else:
             self.status_indicator.setStyleSheet("color: #e06c75;")  # Red
             self.status_text.setText("Offline")

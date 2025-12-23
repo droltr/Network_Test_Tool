@@ -294,23 +294,100 @@ class NetworkDetector:
             logging.debug(f"DNS resolution failed: {str(e)}")
             return False
 
+    def _ping_host(self, host):
+        """Helper to ping a host"""
+        try:
+            if platform.system().lower() == 'windows':
+                cmd = ['ping', '-n', '1', '-w', '1000', host]
+            else:
+                cmd = ['ping', '-c', '1', '-W', '1', host]
+            
+            # We don't need the output, just the return code
+            result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return result.returncode == 0
+        except:
+            return False
+
     def detect_network_issues(self):
         """Diagnose common network issues"""
         issues = []
+        status = "ok"
         
-        # Check internet connectivity
-        if not self.check_internet_connection():
-            issues.append("No internet connectivity")
+        # Get current network info
+        info = self.get_network_info()
+        interfaces = info.get('interfaces', [])
+        gateways = info.get('gateway', [])
         
-        # Check local network
-        if not self.test_local_network():
-            issues.append("Local network connection issues")
+        # 1. Check for APIPA (169.254.x.x)
+        for iface in interfaces:
+            ipv4 = iface.get('ipv4', '')
+            if ipv4.startswith('169.254'):
+                issues.append({
+                    "type": "apipa_address",
+                    "severity": "warning",
+                    "message": f"APIPA address detected on {iface.get('name')}",
+                    "solution": "DHCP server not responding. Try 'ipconfig /renew'"
+                })
+                if status == "ok": status = "warning"
+
+        # 2. Check for No Default Gateway
+        # Only if we have an active interface (excluding loopback and APIPA)
+        active_ifaces = [i for i in interfaces if i.get('ipv4') != 'N/A' and not i.get('ipv4').startswith('127.') and not i.get('ipv4').startswith('169.')]
         
-        # Check DNS
-        if not self.test_dns_resolution():
-            issues.append("DNS resolution problems")
+        if active_ifaces and (not gateways or gateways == ['N/A'] or gateways == ['0.0.0.0']):
+            issues.append({
+                "type": "no_gateway",
+                "severity": "critical",
+                "message": "No default gateway configured",
+                "solution": "Check DHCP settings or configure static IP"
+            })
+            status = "critical"
+
+        # 3. Gateway Unreachable
+        if gateways and gateways != ['N/A'] and gateways != ['0.0.0.0']:
+            gateway_reachable = False
+            for gw in gateways:
+                if self._ping_host(gw):
+                    gateway_reachable = True
+                    break
+            
+            if not gateway_reachable:
+                issues.append({
+                    "type": "gateway_unreachable",
+                    "severity": "critical",
+                    "message": "Cannot reach default gateway",
+                    "solution": "Check physical connection to router/switch"
+                })
+                status = "critical"
+
+        # 4. DNS Resolution Failure
+        # Check if we can ping 8.8.8.8 but not resolve google.com
+        can_ping_google_dns = self._ping_host("8.8.8.8")
+        can_resolve = self.test_dns_resolution()
         
-        return issues if issues else ["No network issues detected"]
+        if can_ping_google_dns and not can_resolve:
+            issues.append({
+                "type": "dns_failure",
+                "severity": "critical",
+                "message": "DNS servers not responding",
+                "solution": "Change DNS to 8.8.8.8 and 8.8.4.4"
+            })
+            status = "critical"
+
+        # 5. Multiple Active Adapters
+        if len(active_ifaces) > 1:
+            issues.append({
+                "type": "multiple_adapters",
+                "severity": "warning",
+                "message": "Multiple active network adapters detected",
+                "solution": "Disable unused adapters to prevent routing issues"
+            })
+            if status == "ok": status = "warning"
+
+        return {
+            "status": status,
+            "issues": issues
+        }
 
     def get_network_status(self):
         """Get current network status"""

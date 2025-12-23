@@ -3,8 +3,11 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                             QListWidget, QListWidgetItem, QSplitter, QMessageBox,
                             QFrame, QScrollArea)
 from PyQt5.QtCore import QThread, pyqtSignal, QTimer, Qt
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QIcon, QDesktopServices
+from PyQt5.QtCore import QUrl
 from network.detector import NetworkDetector
+from network.system_tools import SystemTools
+from network.reporting import ReportGenerator
 import socket
 import platform
 import logging
@@ -22,6 +25,7 @@ class NetworkInfoThread(QThread):
     def run(self):
         try:
             info = self.detector.get_network_info()
+            info['diagnostics'] = self.detector.detect_network_issues()
             self.info_ready.emit(info)
         except Exception as e:
             logging.error(f"NetworkInfoThread.run - Error: {e}")
@@ -126,11 +130,12 @@ class AdapterCard(QFrame):
         layout.addLayout(details_layout)
 
 class NetworkStatusWidget(QWidget):
-    overall_status_update = pyqtSignal(bool)
+    overall_status_update = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
         self.detector = NetworkDetector()
+        self.system_tools = SystemTools()
         self.current_thread = None  # To keep track of the running thread
         self.setup_ui()
         self.setup_timer()
@@ -160,11 +165,53 @@ class NetworkStatusWidget(QWidget):
             error_label = QLabel(f"Error: {info['error']}")
             error_label.setStyleSheet("color: #e06c75; padding: 20px;")
             self.cards_layout.insertWidget(0, error_label)
-            self.overall_status_update.emit(False)
+            self.overall_status_update.emit("offline")
             return
 
         # Update hostname
         self.hostname_label.setText(f"Computer: {info.get('hostname', 'Unknown')}")
+
+        # Update Diagnostics
+        diagnostics = info.get('diagnostics', {})
+        status = diagnostics.get('status', 'ok')
+        issues = diagnostics.get('issues', [])
+        
+        # Clear previous issues
+        while self.issues_list.count():
+            item = self.issues_list.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        if status == 'ok':
+            self.diag_status_label.setText("✓ System Healthy")
+            self.diag_status_label.setStyleSheet("color: #98c379;")
+            self.diagnostics_frame.setStyleSheet("background-color: #2c313a; border-radius: 5px; margin: 10px 25px;")
+        else:
+            if status == 'critical':
+                self.diag_status_label.setText("❌ Critical Issues Detected")
+                self.diag_status_label.setStyleSheet("color: #e06c75;")
+                self.diagnostics_frame.setStyleSheet("background-color: #3e2e2e; border-radius: 5px; margin: 10px 25px; border: 1px solid #e06c75;")
+            else:
+                self.diag_status_label.setText("⚠ Warnings Detected")
+                self.diag_status_label.setStyleSheet("color: #e5c07b;")
+                self.diagnostics_frame.setStyleSheet("background-color: #3d382e; border-radius: 5px; margin: 10px 25px; border: 1px solid #e5c07b;")
+            
+            for issue in issues:
+                issue_widget = QWidget()
+                issue_layout = QHBoxLayout(issue_widget)
+                issue_layout.setContentsMargins(0, 2, 0, 2)
+                
+                msg = QLabel(f"• {issue['message']}")
+                msg.setStyleSheet("color: #abb2bf; font-weight: bold;")
+                issue_layout.addWidget(msg)
+                
+                if 'solution' in issue:
+                    sol = QLabel(f"({issue['solution']})")
+                    sol.setStyleSheet("color: #98c379; font-style: italic;")
+                    issue_layout.addWidget(sol)
+                
+                issue_layout.addStretch()
+                self.issues_list.addWidget(issue_widget)
 
         # Get gateway and DNS info
         gateway_list = info.get('gateway', [])
@@ -200,8 +247,18 @@ class NetworkStatusWidget(QWidget):
 
         # Check overall status
         connections = info.get('connections', [])
-        all_ok = all(conn['status'] in ['Connected', 'Working'] for conn in connections) if connections else False
-        self.overall_status_update.emit(all_ok)
+        
+        internet_status = next((c['status'] for c in connections if c['description'] == 'Internet Connection'), 'Disconnected')
+        local_status = next((c['status'] for c in connections if c['description'] == 'Local Network'), 'Disconnected')
+        
+        if internet_status == 'Connected':
+            status = "online"
+        elif local_status == 'Connected':
+            status = "local"
+        else:
+            status = "offline"
+            
+        self.overall_status_update.emit(status)
     
     def set_selected_adapter_state(self, state):
         # This feature requires selecting from cards - not implemented in card view
@@ -232,6 +289,69 @@ class NetworkStatusWidget(QWidget):
         header_layout.addWidget(self.hostname_label)
         
         layout.addWidget(header_frame)
+        
+        # Diagnostics Panel
+        self.diagnostics_frame = QFrame()
+        self.diagnostics_frame.setObjectName("diagnosticsFrame")
+        self.diagnostics_frame.setStyleSheet("background-color: #2c313a; border-radius: 5px; margin: 10px 25px;")
+        
+        diag_layout = QVBoxLayout(self.diagnostics_frame)
+        diag_layout.setContentsMargins(15, 10, 15, 10)
+        
+        self.diag_status_label = QLabel("✓ System Healthy")
+        self.diag_status_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        self.diag_status_label.setStyleSheet("color: #98c379;")
+        diag_layout.addWidget(self.diag_status_label)
+        
+        self.issues_list = QVBoxLayout()
+        diag_layout.addLayout(self.issues_list)
+        
+        layout.addWidget(self.diagnostics_frame)
+
+        # Quick Actions Panel
+        self.actions_frame = QFrame()
+        self.actions_frame.setObjectName("actionsFrame")
+        self.actions_frame.setStyleSheet("background-color: #2c313a; border-radius: 5px; margin: 0 25px 10px 25px;")
+        
+        actions_layout = QHBoxLayout(self.actions_frame)
+        actions_layout.setContentsMargins(15, 10, 15, 10)
+        actions_layout.setSpacing(10)
+        
+        actions_label = QLabel("Quick Actions:")
+        actions_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        actions_label.setStyleSheet("color: #abb2bf;")
+        actions_layout.addWidget(actions_label)
+        
+        self.btn_renew = QPushButton("Renew IP")
+        self.btn_renew.setToolTip("ipconfig /renew")
+        self.btn_renew.clicked.connect(lambda: self.run_quick_action("renew_ip"))
+        actions_layout.addWidget(self.btn_renew)
+        
+        self.btn_flush = QPushButton("Flush DNS")
+        self.btn_flush.setToolTip("ipconfig /flushdns")
+        self.btn_flush.clicked.connect(lambda: self.run_quick_action("flush_dns"))
+        actions_layout.addWidget(self.btn_flush)
+        
+        self.btn_release = QPushButton("Release IP")
+        self.btn_release.setToolTip("ipconfig /release")
+        self.btn_release.clicked.connect(lambda: self.run_quick_action("release_ip"))
+        actions_layout.addWidget(self.btn_release)
+        
+        # Separator
+        line = QFrame()
+        line.setFrameShape(QFrame.VLine)
+        line.setStyleSheet("background-color: #3e4451;")
+        actions_layout.addWidget(line)
+
+        # Report Button
+        self.btn_report = QPushButton("Generate Report")
+        self.btn_report.setStyleSheet("background-color: #61afef; color: white; font-weight: bold;")
+        self.btn_report.clicked.connect(self.generate_report)
+        actions_layout.addWidget(self.btn_report)
+        
+        actions_layout.addStretch()
+        
+        layout.addWidget(self.actions_frame)
         
         # Scroll area for adapter cards
         scroll = QScrollArea()
@@ -276,6 +396,74 @@ class NetworkStatusWidget(QWidget):
         # Store reference to selected adapter
         self.selected_adapter = None
         
+    def generate_report(self):
+        """Generate and open a network report."""
+        self.setCursor(Qt.WaitCursor)
+        try:
+            # Generate default filename with timestamp
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_filename = f"network_report_{timestamp}.txt"
+            
+            self.setCursor(Qt.ArrowCursor)
+            
+            options = QFileDialog.Options()
+            options |= QFileDialog.DontUseNativeDialog
+            file_path, _ = QFileDialog.getSaveFileName(self, "Save Network Report", default_filename, "Text Files (*.txt);;All Files (*)", options=options)
+            
+            if not file_path:
+                return
+
+            self.setCursor(Qt.WaitCursor)
+            
+            reporter = ReportGenerator()
+            # Pass the full path to the reporter
+            filepath = reporter.generate_text_report(file_path)
+            
+            self.setCursor(Qt.ArrowCursor)
+            
+            msg = QMessageBox()
+            msg.setWindowTitle("Report Generated")
+            msg.setText(f"Report saved successfully:\n{filepath}")
+            msg.setStandardButtons(QMessageBox.Open | QMessageBox.Ok)
+            ret = msg.exec_()
+            
+            if ret == QMessageBox.Open:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(filepath))
+                
+        except Exception as e:
+            self.setCursor(Qt.ArrowCursor)
+            QMessageBox.critical(self, "Error", f"Failed to generate report: {str(e)}")
+
+    def run_quick_action(self, action_name):
+        """Execute a quick action command"""
+        self.setCursor(Qt.WaitCursor)
+        success = False
+        output = ""
+        
+        try:
+            if action_name == "renew_ip":
+                success, output = self.system_tools.renew_ip()
+                action_desc = "Renew IP"
+            elif action_name == "flush_dns":
+                success, output = self.system_tools.flush_dns()
+                action_desc = "Flush DNS"
+            elif action_name == "release_ip":
+                success, output = self.system_tools.release_ip()
+                action_desc = "Release IP"
+            
+            self.setCursor(Qt.ArrowCursor)
+            
+            if success:
+                QMessageBox.information(self, "Success", f"{action_desc} completed successfully.\n\nOutput:\n{output}")
+                self.refresh_info() # Refresh status after action
+            else:
+                QMessageBox.warning(self, "Failed", f"{action_desc} failed.\n\nError:\n{output}")
+                
+        except Exception as e:
+            self.setCursor(Qt.ArrowCursor)
+            QMessageBox.critical(self, "Error", f"An error occurred: {str(e)}")
+
     def setup_timer(self):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh_info)
