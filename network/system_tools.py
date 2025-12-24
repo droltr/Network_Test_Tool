@@ -23,17 +23,24 @@ class SystemTools:
             logging.error(f"Command execution failed: {e}")
             return False, str(e)
 
-    def renew_ip(self):
-        """Renew IP address lease."""
+    def renew_ip(self, adapter_name=None):
+        """Renew IP address lease. Optionally for a specific adapter."""
         if self.platform == "windows":
-            return self._run_command(["ipconfig", "/renew"])
+            cmd = ["ipconfig", "/renew"]
+            if adapter_name:
+                cmd.append(f'"{adapter_name}"')
+            # Join command for shell execution to handle quotes properly
+            return self._run_command(" ".join(cmd))
         else:
             return self._run_command(["sudo", "dhclient", "-v"])
 
-    def release_ip(self):
-        """Release IP address lease."""
+    def release_ip(self, adapter_name=None):
+        """Release IP address lease. Optionally for a specific adapter."""
         if self.platform == "windows":
-            return self._run_command(["ipconfig", "/release"])
+            cmd = ["ipconfig", "/release"]
+            if adapter_name:
+                cmd.append(f'"{adapter_name}"')
+            return self._run_command(" ".join(cmd))
         else:
             return self._run_command(["sudo", "dhclient", "-r"])
 

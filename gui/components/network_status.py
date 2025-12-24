@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                             QGroupBox, QGridLayout, QPushButton, QProgressBar,
                             QListWidget, QListWidgetItem, QSplitter, QMessageBox,
-                            QFrame, QScrollArea)
+                            QFrame, QScrollArea, QComboBox)
 from PyQt5.QtCore import QThread, pyqtSignal, QTimer, Qt
 from PyQt5.QtGui import QFont, QIcon, QDesktopServices
 from PyQt5.QtCore import QUrl
@@ -51,6 +51,7 @@ class AdapterCard(QFrame):
         mac = self.adapter_data.get('mac', 'N/A')
         
         is_active = ipv4 != 'N/A' and not ipv4.startswith('127.') and not ipv4.startswith('169.')
+        is_apipa = ipv4.startswith('169.254')
         
         # Header row: Name and Status
         header_layout = QHBoxLayout()
@@ -58,17 +59,31 @@ class AdapterCard(QFrame):
         name_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
         name_label.setStyleSheet("color: #abb2bf;")
         
+        status_layout = QHBoxLayout()
+        status_layout.setSpacing(10)
+
+        if is_apipa:
+            apipa_label = QLabel("⚠ APIPA")
+            apipa_label.setStyleSheet("color: #e5c07b; font-weight: bold; border: 1px solid #e5c07b; border-radius: 3px; padding: 2px 5px;")
+            apipa_label.setToolTip("DHCP server not responding. Try 'ipconfig /renew'")
+            status_layout.addWidget(apipa_label)
+
         status_label = QLabel()
         if is_active:
             status_label.setText("● Active")
             status_label.setStyleSheet("color: #98c379; font-weight: 600;")
+        elif is_apipa:
+            status_label.setText("● Limited")
+            status_label.setStyleSheet("color: #e5c07b; font-weight: 600;")
         else:
             status_label.setText("○ Inactive")
             status_label.setStyleSheet("color: #5c6370; font-weight: 600;")
         
+        status_layout.addWidget(status_label)
+
         header_layout.addWidget(name_label)
         header_layout.addStretch()
-        header_layout.addWidget(status_label)
+        header_layout.addLayout(status_layout)
         layout.addLayout(header_layout)
         
         # Separator line
@@ -86,11 +101,14 @@ class AdapterCard(QFrame):
         row = 0
         
         # IP Address
-        if is_active:
+        if is_active or is_apipa:
             ip_title = QLabel("IP Address:")
             ip_title.setStyleSheet("color: #5c6370; font-size: 9pt;")
             ip_value = QLabel(ipv4)
-            ip_value.setStyleSheet("color: #61afef; font-size: 10pt; font-weight: 600;")
+            if is_apipa:
+                ip_value.setStyleSheet("color: #e5c07b; font-size: 10pt; font-weight: 600;")
+            else:
+                ip_value.setStyleSheet("color: #61afef; font-size: 10pt; font-weight: 600;")
             ip_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
             details_layout.addWidget(ip_title, row, 0)
             details_layout.addWidget(ip_value, row, 1)
@@ -174,7 +192,10 @@ class NetworkStatusWidget(QWidget):
         # Update Diagnostics
         diagnostics = info.get('diagnostics', {})
         status = diagnostics.get('status', 'ok')
-        issues = diagnostics.get('issues', [])
+        all_issues = diagnostics.get('issues', [])
+        
+        # Filter out APIPA issues as they are now shown on cards
+        issues = [i for i in all_issues if i.get('type') != 'apipa_address']
         
         # Clear previous issues
         while self.issues_list.count():
@@ -182,32 +203,38 @@ class NetworkStatusWidget(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         
-        if status == 'ok':
+        if not issues and status != 'critical':
+            # Compact healthy state
             self.diag_status_label.setText("✓ System Healthy")
-            self.diag_status_label.setStyleSheet("color: #98c379;")
-            self.diagnostics_frame.setStyleSheet("background-color: #2c313a; border-radius: 5px; margin: 10px 25px;")
+            self.diag_status_label.setStyleSheet("color: #98c379; font-weight: bold;")
+            self.diagnostics_frame.setStyleSheet("background-color: #2c313a; border-radius: 5px; margin: 5px 25px;")
+            self.diagnostics_frame.setVisible(True)
         else:
+            # Issues detected
             if status == 'critical':
-                self.diag_status_label.setText("❌ Critical Issues Detected")
-                self.diag_status_label.setStyleSheet("color: #e06c75;")
-                self.diagnostics_frame.setStyleSheet("background-color: #3e2e2e; border-radius: 5px; margin: 10px 25px; border: 1px solid #e06c75;")
+                self.diag_status_label.setText(f"❌ {len(issues)} Critical Issue(s)")
+                self.diag_status_label.setStyleSheet("color: #e06c75; font-weight: bold;")
+                self.diagnostics_frame.setStyleSheet("background-color: #3e2e2e; border-radius: 5px; margin: 5px 25px; border: 1px solid #e06c75;")
             else:
-                self.diag_status_label.setText("⚠ Warnings Detected")
-                self.diag_status_label.setStyleSheet("color: #e5c07b;")
-                self.diagnostics_frame.setStyleSheet("background-color: #3d382e; border-radius: 5px; margin: 10px 25px; border: 1px solid #e5c07b;")
+                self.diag_status_label.setText(f"⚠ {len(issues)} Warning(s)")
+                self.diag_status_label.setStyleSheet("color: #e5c07b; font-weight: bold;")
+                self.diagnostics_frame.setStyleSheet("background-color: #3d382e; border-radius: 5px; margin: 5px 25px; border: 1px solid #e5c07b;")
+            
+            self.diagnostics_frame.setVisible(True)
             
             for issue in issues:
                 issue_widget = QWidget()
                 issue_layout = QHBoxLayout(issue_widget)
-                issue_layout.setContentsMargins(0, 2, 0, 2)
+                issue_layout.setContentsMargins(0, 0, 0, 0)
+                issue_layout.setSpacing(5)
                 
                 msg = QLabel(f"• {issue['message']}")
-                msg.setStyleSheet("color: #abb2bf; font-weight: bold;")
+                msg.setStyleSheet("color: #abb2bf;")
                 issue_layout.addWidget(msg)
                 
                 if 'solution' in issue:
-                    sol = QLabel(f"({issue['solution']})")
-                    sol.setStyleSheet("color: #98c379; font-style: italic;")
+                    sol = QLabel(f"→ {issue['solution']}")
+                    sol.setStyleSheet("color: #98c379; font-style: italic; font-size: 9pt;")
                     issue_layout.addWidget(sol)
                 
                 issue_layout.addStretch()
@@ -227,8 +254,9 @@ class NetworkStatusWidget(QWidget):
         for interface in interfaces:
             ipv4 = interface.get('ipv4', 'N/A')
             is_active = ipv4 != 'N/A' and not ipv4.startswith('127.') and not ipv4.startswith('169.')
+            is_apipa = ipv4.startswith('169.254')
             
-            if is_active:
+            if is_active or is_apipa:
                 active_adapters.append(interface)
             else:
                 inactive_adapters.append(interface)
@@ -239,6 +267,22 @@ class NetworkStatusWidget(QWidget):
         
         # Combine: active first, then inactive
         sorted_interfaces = active_adapters + inactive_adapters
+        
+        # Update Adapter ComboBox
+        current_selection = self.adapter_combo.currentText()
+        self.adapter_combo.blockSignals(True)
+        self.adapter_combo.clear()
+        self.adapter_combo.addItem("All Adapters")
+        
+        # Add only active/APIPA adapters to the list
+        for interface in active_adapters:
+            self.adapter_combo.addItem(interface.get('name', 'Unknown'))
+            
+        # Restore selection if possible
+        index = self.adapter_combo.findText(current_selection)
+        if index >= 0:
+            self.adapter_combo.setCurrentIndex(index)
+        self.adapter_combo.blockSignals(False)
         
         # Create card for each adapter
         for interface in sorted_interfaces:
@@ -293,13 +337,13 @@ class NetworkStatusWidget(QWidget):
         # Diagnostics Panel
         self.diagnostics_frame = QFrame()
         self.diagnostics_frame.setObjectName("diagnosticsFrame")
-        self.diagnostics_frame.setStyleSheet("background-color: #2c313a; border-radius: 5px; margin: 10px 25px;")
+        self.diagnostics_frame.setStyleSheet("background-color: #2c313a; border-radius: 5px; margin: 5px 25px;")
         
         diag_layout = QVBoxLayout(self.diagnostics_frame)
-        diag_layout.setContentsMargins(15, 10, 15, 10)
+        diag_layout.setContentsMargins(10, 5, 10, 5)
         
         self.diag_status_label = QLabel("✓ System Healthy")
-        self.diag_status_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        self.diag_status_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
         self.diag_status_label.setStyleSheet("color: #98c379;")
         diag_layout.addWidget(self.diag_status_label)
         
@@ -311,30 +355,53 @@ class NetworkStatusWidget(QWidget):
         # Quick Actions Panel
         self.actions_frame = QFrame()
         self.actions_frame.setObjectName("actionsFrame")
-        self.actions_frame.setStyleSheet("background-color: #2c313a; border-radius: 5px; margin: 0 25px 10px 25px;")
+        self.actions_frame.setStyleSheet("background-color: #2c313a; border-radius: 5px; margin: 0 25px 5px 25px;")
         
         actions_layout = QHBoxLayout(self.actions_frame)
-        actions_layout.setContentsMargins(15, 10, 15, 10)
-        actions_layout.setSpacing(10)
+        actions_layout.setContentsMargins(10, 5, 10, 5)
+        actions_layout.setSpacing(15)
         
         actions_label = QLabel("Quick Actions:")
-        actions_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        actions_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
         actions_label.setStyleSheet("color: #abb2bf;")
         actions_layout.addWidget(actions_label)
         
-        self.btn_renew = QPushButton("Renew IP")
-        self.btn_renew.setToolTip("ipconfig /renew")
-        self.btn_renew.clicked.connect(lambda: self.run_quick_action("renew_ip"))
+        # Adapter Selection
+        self.adapter_combo = QComboBox()
+        self.adapter_combo.setMinimumWidth(200)
+        self.adapter_combo.setToolTip("Select target adapter for IP operations")
+        self.adapter_combo.addItem("All Adapters")
+        actions_layout.addWidget(self.adapter_combo)
+        
+        # Helper to create compact buttons
+        def create_action_btn(text, tooltip, callback, color="#61afef"):
+            btn = QPushButton(text)
+            btn.setToolTip(tooltip)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: transparent;
+                    color: {color};
+                    border: 1px solid {color};
+                    border-radius: 3px;
+                    padding: 3px 10px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: {color};
+                    color: #282c34;
+                }}
+            """)
+            btn.clicked.connect(callback)
+            return btn
+
+        self.btn_renew = create_action_btn("Renew IP", "ipconfig /renew", lambda: self.run_quick_action("renew_ip"))
         actions_layout.addWidget(self.btn_renew)
         
-        self.btn_flush = QPushButton("Flush DNS")
-        self.btn_flush.setToolTip("ipconfig /flushdns")
-        self.btn_flush.clicked.connect(lambda: self.run_quick_action("flush_dns"))
+        self.btn_flush = create_action_btn("Flush DNS", "ipconfig /flushdns", lambda: self.run_quick_action("flush_dns"))
         actions_layout.addWidget(self.btn_flush)
         
-        self.btn_release = QPushButton("Release IP")
-        self.btn_release.setToolTip("ipconfig /release")
-        self.btn_release.clicked.connect(lambda: self.run_quick_action("release_ip"))
+        self.btn_release = create_action_btn("Release IP", "ipconfig /release", lambda: self.run_quick_action("release_ip"))
         actions_layout.addWidget(self.btn_release)
         
         # Separator
@@ -344,9 +411,7 @@ class NetworkStatusWidget(QWidget):
         actions_layout.addWidget(line)
 
         # Report Button
-        self.btn_report = QPushButton("Generate Report")
-        self.btn_report.setStyleSheet("background-color: #61afef; color: white; font-weight: bold;")
-        self.btn_report.clicked.connect(self.generate_report)
+        self.btn_report = create_action_btn("Generate Report", "Export network report", self.generate_report, color="#98c379")
         actions_layout.addWidget(self.btn_report)
         
         actions_layout.addStretch()
@@ -441,16 +506,21 @@ class NetworkStatusWidget(QWidget):
         success = False
         output = ""
         
+        # Get selected adapter
+        selected_adapter = self.adapter_combo.currentText()
+        adapter_arg = None if selected_adapter == "All Adapters" else selected_adapter
+        
         try:
             if action_name == "renew_ip":
-                success, output = self.system_tools.renew_ip()
-                action_desc = "Renew IP"
+                success, output = self.system_tools.renew_ip(adapter_arg)
+                action_desc = f"Renew IP ({selected_adapter})"
             elif action_name == "flush_dns":
+                # DNS flush is global
                 success, output = self.system_tools.flush_dns()
                 action_desc = "Flush DNS"
             elif action_name == "release_ip":
-                success, output = self.system_tools.release_ip()
-                action_desc = "Release IP"
+                success, output = self.system_tools.release_ip(adapter_arg)
+                action_desc = f"Release IP ({selected_adapter})"
             
             self.setCursor(Qt.ArrowCursor)
             

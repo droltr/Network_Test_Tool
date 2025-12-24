@@ -54,8 +54,11 @@ class Troubleshooter:
                 log_and_callback(f"        Success ({ping_result['statistics']['avg_time']:.2f}ms avg)")
             else:
                 log_and_callback("        Failed to ping gateway.")
+                log_and_callback("        [SUGGESTION] Check physical connection to router/switch.")
+                log_and_callback("        [SUGGESTION] Ensure router is powered on.")
         else:
             log_and_callback("    Gateway not found, skipping ping test.")
+            log_and_callback("    [SUGGESTION] Check DHCP settings or configure static IP.")
 
         # Ping DNS
         dns_server = info.get('dns', [None])[0]
@@ -66,8 +69,10 @@ class Troubleshooter:
                 log_and_callback(f"        Success ({ping_result['statistics']['avg_time']:.2f}ms avg)")
             else:
                 log_and_callback("        Failed to ping DNS server.")
+                log_and_callback("        [SUGGESTION] Try changing DNS to Google (8.8.8.8) or Cloudflare (1.1.1.1).")
         else:
             log_and_callback("    DNS server not found, skipping ping test.")
+            log_and_callback("    [SUGGESTION] Configure DNS servers manually.")
 
         # Ping External Host
         log_and_callback("    Pinging external host (8.8.8.8)...")
@@ -76,6 +81,8 @@ class Troubleshooter:
             log_and_callback(f"        Success ({ping_result['statistics']['avg_time']:.2f}ms avg)\n")
         else:
             log_and_callback("        Failed to ping external host.\n")
+            log_and_callback("        [SUGGESTION] Check internet subscription or ISP status.")
+            log_and_callback("        [SUGGESTION] Verify firewall settings are not blocking traffic.\n")
 
         # 3. Traceroute
         log_and_callback("3. Performing Traceroute to 1.1.1.1...")
