@@ -19,6 +19,18 @@ A modern, comprehensive network diagnostic and troubleshooting utility built wit
 *   **Troubleshooter:** Automated network diagnostics to identify common connectivity issues.
 *   **Modern UI:** Clean, dark-themed interface designed for ease of use.
 
+## 📚 Documentation
+
+Full documentation is available in the [docs/](docs/) directory:
+
+*   [Home](docs/Home.md)
+*   [Installation & Setup](docs/Installation.md)
+*   [User Guide: Network Status](docs/User-Guide-Network-Status.md)
+*   [User Guide: Diagnostic Tools](docs/User-Guide-Diagnostic-Tools.md)
+*   [Reporting & Exporting](docs/Reporting.md)
+*   [Troubleshooting & FAQ](docs/Troubleshooting.md)
+*   [Security & Privacy](docs/Security.md)
+
 ## Installation
 
 1.  **Clone the repository:**
