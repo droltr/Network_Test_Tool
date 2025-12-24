@@ -17,7 +17,7 @@ def build_windows():
     
     command = [
         "pyinstaller",
-        "--noconsole",
+        "--console",  # Changed from --noconsole for debugging
         "--onefile",
         "--name=NetworkTestTool",
         "--clean",

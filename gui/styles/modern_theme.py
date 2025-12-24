@@ -354,4 +354,31 @@ class ModernTheme:
         QScrollBar::handle:horizontal:hover {{
             background-color: {self.accent_color};
         }}
+        
+        QTableWidget {{
+            background-color: {self.primary_color};
+            border: 1px solid {self.border_color};
+            border-radius: 6px;
+            gridline-color: {self.border_color};
+            color: {self.text_color};
+            alternate-background-color: {self.secondary_color};
+        }}
+
+        QTableWidget::item {{
+            padding: 5px;
+            border-bottom: 1px solid {self.border_color};
+        }}
+
+        QTableWidget::item:selected {{
+            background-color: {self.accent_color};
+            color: white;
+        }}
+
+        QHeaderView::section {{
+            background-color: {self.secondary_color};
+            color: {self.text_color};
+            padding: 5px;
+            border: 1px solid {self.border_color};
+            font-weight: bold;
+        }}
         """

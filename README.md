@@ -1,14 +1,15 @@
 # Network Test Tool
 
-**Version:** 0.5  
+**Version:** 0.6.2 (Stable)
+**GitHub:** [https://github.com/droltr/Network_Test_Tool](https://github.com/droltr/Network_Test_Tool)
 
 A modern, comprehensive network diagnostic and troubleshooting utility built with Python and PyQt5.
 
 ## Features
 
-*   **Network Status:** Real-time monitoring of network adapters, IP addresses, and connection status.
-*   **Intelligent Diagnostics:** Automatic detection of common issues (APIPA, DNS failure, Gateway unreachable).
-*   **Quick Actions:** One-click IP renewal, DNS flush, and IP release.
+*   **Network Status:** Real-time monitoring of network adapters with intelligent sorting (Active/APIPA first).
+*   **Intelligent Diagnostics:** Automatic detection of common issues (APIPA, DNS failure, Gateway unreachable) with solution suggestions.
+*   **Quick Actions:** One-click IP renewal, DNS flush, and IP release with specific adapter selection.
 *   **Trace Route:** Visual trace route tool with hop-by-hop latency and status.
 *   **Advanced Tools:** ARP table viewer, active connections monitor, and NetBIOS lookup.
 *   **Ping Test:** Advanced ping tool with customizable parameters and graphical results.
