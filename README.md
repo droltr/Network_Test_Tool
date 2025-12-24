@@ -1,9 +1,24 @@
 # Network Test Tool
 
+![Build Status](https://img.shields.io/github/actions/workflow/status/droltr/Network_Test_Tool/build.yml?branch=master)
+![License](https://img.shields.io/github/license/droltr/Network_Test_Tool)
+![Python Version](https://img.shields.io/badge/python-3.8%2B-blue)
+![Release](https://img.shields.io/github/v/release/droltr/Network_Test_Tool)
+
 **Version:** 0.6.2 (Stable)
 **GitHub:** [https://github.com/droltr/Network_Test_Tool](https://github.com/droltr/Network_Test_Tool)
 
 A modern, comprehensive network diagnostic and troubleshooting utility built with Python and PyQt5.
+
+## 📥 Download
+
+**[Download Latest Release (Windows & Linux)](https://github.com/droltr/Network_Test_Tool/releases/latest)**
+
+No installation required. Just download and run.
+
+## 📸 Screenshots
+
+*(Add screenshots of the application here)*
 
 ## Features
 
@@ -35,7 +50,7 @@ Full documentation is available in the [docs/](docs/) directory:
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/yourusername/Network_Test_Tool.git
+    git clone https://github.com/droltr/Network_Test_Tool.git
     cd Network_Test_Tool
     ```
 
@@ -57,6 +72,10 @@ python main.py
 *   PyQt5
 *   psutil
 *   speedtest-cli
+
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct, and the process for submitting pull requests.
 
 ## License
 
