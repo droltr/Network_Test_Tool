@@ -36,3 +36,7 @@ crash_log.txt
 
 # Project specific
 .deleted/
+reports/
+*.txt
+*.csv
+*.json
