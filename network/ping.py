@@ -5,12 +5,24 @@ import socket
 import statistics
 from datetime import datetime
 
+from utils.paths import command_env
+
 class PingTester:
     def __init__(self):
         self.platform = platform.system().lower()
+        self.is_running = False
+
+    def stop(self):
+        """Stop an ongoing ping_host() after the current echo request."""
+        self.is_running = False
         
-    def ping_host(self, host, count=4, timeout=3, progress_callback=None):
-        """Ping a host and return detailed results"""
+    def ping_host(self, host, count=4, timeout=3, progress_callback=None, reply_callback=None):
+        """Ping a host and return detailed results.
+
+        reply_callback, if given, receives each response dict (sequence, time, status, ttl)
+        as soon as it arrives.
+        """
+        self.is_running = True
         try:
             results = {
                 'host': host,
@@ -25,9 +37,13 @@ class PingTester:
             received = 0
             
             for i in range(count):
+                if not self.is_running:
+                    results['stopped'] = True
+                    break
                 sent += 1
                 ping_data = self._single_ping(host, timeout)
                 
+                ttl = None
                 if ping_data and ping_data.get('time') is not None:
                     received += 1
                     response_time = ping_data['time']
@@ -42,18 +58,24 @@ class PingTester:
                     status = "Timeout"
                     message = f"Request timeout for {host}"
                 
-                results['responses'].append({
+                response = {
                     'sequence': i + 1,
                     'time': response_time,
                     'status': status,
-                    'ttl': ttl if 'ttl' in locals() else None
-                })
+                    'ttl': ttl
+                }
+                results['responses'].append(response)
                 
                 if progress_callback:
                     progress_callback(message)
+                if reply_callback:
+                    reply_callback(response)
                 
                 if i < count - 1:  # Don't sleep after last ping
-                    time.sleep(1)
+                    # Sleep in small steps so stop() takes effect quickly
+                    deadline = time.monotonic() + 1
+                    while self.is_running and time.monotonic() < deadline:
+                        time.sleep(0.05)
             
             # Calculate statistics
             lost = sent - received
@@ -80,6 +102,8 @@ class PingTester:
             
         except Exception as e:
             return {'error': str(e), 'host': host}
+        finally:
+            self.is_running = False
     
     def _single_ping(self, host, timeout):
         """Perform a single ping and return response time and TTL."""
@@ -89,7 +113,7 @@ class PingTester:
             else:
                 cmd = ["ping", "-c", "1", "-W", str(timeout), host]
             
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 1)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 1, env=command_env())
             
             if result.returncode == 0:
                 output = result.stdout.lower()

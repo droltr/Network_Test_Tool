@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+build/
+dist/
+.deleted/
+.git/
+*.log
+assets/fonts/
+design_handoff_ui_redesign/support.js

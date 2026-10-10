@@ -40,3 +40,11 @@ reports/
 *.txt
 *.csv
 *.json
+
+# Local virtual environment
+.venv/
+
+# Keep dependency and license files despite the *.txt rule above
+!requirements.txt
+!licenses/*.txt
+!assets/data/*.json

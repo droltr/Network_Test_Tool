@@ -1,147 +1,92 @@
-import sys
-import webbrowser
-from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                            QTabWidget, QLabel, QFrame, QPushButton, QTextEdit,
-                            QLineEdit, QSpinBox, QProgressBar, QGroupBox, QGridLayout,
-                            QMessageBox, QComboBox, QListWidget, QSplitter, QApplication, QAction, QSizePolicy)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt5.QtGui import QFont, QPalette, QColor, QIcon
-from .components.network_status import NetworkStatusWidget
-from .components.ping_test import PingTestWidget
-from .components.port_scanner import PortScannerWidget
-from .components.speed_test import SpeedTestWidget
-from .components.auto_test import AutoTestWidget
-from .components.trace_route import TraceRouteWidget
-from .components.advanced_tools import AdvancedWidget
+from PyQt5.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QStackedWidget, QMessageBox, QAction
+
+from version import __version__
+from .pages.dashboard import DashboardPage
+from .pages.diagnose import DiagnosePage
+from .pages.port_scanner import PortScannerPage
+from .pages.speed_test import SpeedTestPage
+from .pages.advanced import AdvancedPage
+from .pages.iperf import IperfPage
+from .pages.health import HealthPage
+from .pages.troubleshooter import TroubleshooterPage
 from .styles.modern_theme import ModernTheme
+from .widgets.sidebar import Sidebar
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Network Test Tool")
-        self.setGeometry(100, 100, 1400, 900)
-        self.setMinimumSize(1200, 800)
+        self.resize(1280, 800)
+        self.setMinimumSize(1200, 760)
         self.create_menu_bar()
         self.setup_ui()
         self.apply_theme()
-        
+        self.show_page("dashboard")
+
     def setup_ui(self):
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        
-        layout = QVBoxLayout(central_widget)
+        root = QWidget()
+        root.setObjectName("appRoot")
+        self.setCentralWidget(root)
+        layout = QHBoxLayout(root)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        
-        # Header
-        header = self.create_header()
-        layout.addWidget(header)
-        
-        # Main content with tabs
-        self.tab_widget = QTabWidget()
-        self.tab_widget.setTabPosition(QTabWidget.North)
-        
-        # Add tabs
-        self.status_widget = NetworkStatusWidget()
-        self.status_widget.overall_status_update.connect(self.update_overall_status)
-        self.tab_widget.addTab(self.status_widget, "Network Status")
-        
-        self.ping_widget = PingTestWidget()
-        self.tab_widget.addTab(self.ping_widget, "Ping Test")
-        
-        self.port_widget = PortScannerWidget()
-        self.tab_widget.addTab(self.port_widget, "Port Scanner")
-        
-        self.speed_widget = SpeedTestWidget()
-        self.tab_widget.addTab(self.speed_widget, "Speed Test")
 
-        self.trace_widget = TraceRouteWidget()
-        self.tab_widget.addTab(self.trace_widget, "Trace Route")
+        self.sidebar = Sidebar()
+        self.sidebar.page_selected.connect(self.show_page)
+        self.sidebar.ask_ai.connect(self.open_ask_ai)
+        layout.addWidget(self.sidebar)
 
-        self.advanced_widget = AdvancedWidget()
-        self.tab_widget.addTab(self.advanced_widget, "Advanced")
+        self.stack = QStackedWidget()
+        self.stack.setObjectName("pages")
+        layout.addWidget(self.stack, 1)
 
-        self.auto_test_widget = AutoTestWidget()
-        self.tab_widget.addTab(self.auto_test_widget, "Troubleshooter")
-        
-        layout.addWidget(self.tab_widget)
-        
-        # Footer
-        footer = self.create_footer()
-        layout.addWidget(footer)
-        
-    def create_header(self):
-        header_frame = QFrame()
-        header_frame.setFixedHeight(60)
-        header_frame.setObjectName("headerFrame")
-        
-        layout = QHBoxLayout(header_frame)
-        layout.setContentsMargins(25, 0, 25, 0)
-        
-        # Right: Round status indicator
-        status_layout = QHBoxLayout()
-        status_layout.setSpacing(10)
-        
-        self.status_text = QLabel("Offline")
-        self.status_text.setFont(QFont("Segoe UI", 12, QFont.Bold))
-        self.status_text.setStyleSheet("color: #e06c75;")
-        
-        self.status_indicator = QLabel("●")
-        self.status_indicator.setObjectName("statusIndicator")
-        self.status_indicator.setFont(QFont("Segoe UI", 32)) # Increased size
-        self.status_indicator.setStyleSheet("color: #e06c75;")  # Red by default
-        
-        status_layout.addWidget(self.status_text)
-        status_layout.addWidget(self.status_indicator)
-        
-        layout.addStretch()
-        layout.addLayout(status_layout)
-        
-        return header_frame
-        
-    def create_footer(self):
-        footer_frame = QFrame()
-        footer_frame.setFixedHeight(35)
-        footer_frame.setObjectName("footerFrame")
-        
-        layout = QHBoxLayout(footer_frame)
-        layout.setContentsMargins(25, 0, 25, 0)
-        
-        # Removed footer label as requested
-        
-        layout.addStretch()
-        
-        return footer_frame
-        
+        self.pages = {
+            "dashboard": DashboardPage(),
+            "diagnose": DiagnosePage(),
+            "port": PortScannerPage(),
+            "speed": SpeedTestPage(),
+            "iperf": IperfPage(),
+            "health": HealthPage(),
+            "advanced": AdvancedPage(),
+            "trouble": TroubleshooterPage(),
+        }
+        for key, page in self.pages.items():
+            self.stack.addWidget(page)
+            page.running_changed.connect(lambda running, k=key: self.sidebar.items[k].set_running(running))
+            page.navigate.connect(self.navigate)
+
+        dashboard = self.pages["dashboard"]
+        dashboard.overall_status.connect(self.sidebar.status_card.set_status)
+        dashboard.issues_changed.connect(self.sidebar.items["dashboard"].set_count)
+
+    def show_page(self, key):
+        self.stack.setCurrentWidget(self.pages[key])
+        self.sidebar.set_active(key)
+
+    def navigate(self, key, payload):
+        self.show_page(key)
+        self.pages[key].handle_request(payload or {})
+
+    def session_logs(self):
+        """Logs from this session that can go into the AI package."""
+        logs = {}
+        trouble_log = self.pages["trouble"].log.plain_text().strip()
+        if trouble_log:
+            logs["Troubleshooter log"] = trouble_log
+        logs.update(self.pages["health"].session_logs())
+        return logs
+
+    def open_ask_ai(self):
+        from .dialogs.ask_ai import AskAiDialog
+        AskAiDialog(self.session_logs, self).exec_()
+
     def apply_theme(self):
-        theme = ModernTheme()
-        self.setStyleSheet(theme.get_stylesheet())
-        
-    def update_status(self, message):
-        self.status_label.setText(message)
-
-    def update_overall_status(self, status):
-        # This updates the round indicator based on internet connectivity
-        if status == "online":
-            self.status_indicator.setStyleSheet("color: #98c379;")  # Green
-            self.status_text.setText("Online")
-            self.status_text.setStyleSheet("color: #98c379;")
-        elif status == "local":
-            self.status_indicator.setStyleSheet("color: #e5c07b;")  # Yellow
-            self.status_text.setText("Local Only")
-            self.status_text.setStyleSheet("color: #e5c07b;")
-        else:
-            self.status_indicator.setStyleSheet("color: #e06c75;")  # Red
-            self.status_text.setText("Offline")
-            self.status_text.setStyleSheet("color: #e06c75;")
+        self.setStyleSheet(ModernTheme().get_stylesheet())
 
     def closeEvent(self, event):
-        # Call cleanup for all widgets that might have running threads or timers
-        self.status_widget.cleanup()
-        self.ping_widget.cleanup()
-        self.port_widget.cleanup()
-        self.speed_widget.cleanup()
-        self.auto_test_widget.cleanup()
+        # Call cleanup for all pages that might have running threads or timers
+        for page in self.pages.values():
+            page.cleanup()
         super().closeEvent(event)
 
     def create_menu_bar(self):
@@ -149,7 +94,7 @@ class MainWindow(QMainWindow):
 
         # File menu
         file_menu = menu_bar.addMenu("File")
-        
+
         exit_action = QAction("Exit", self)
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
@@ -164,7 +109,10 @@ class MainWindow(QMainWindow):
 
     def show_about_dialog(self):
         QMessageBox.about(self, "About Network Test Tool",
-                          """<b>Network Test Tool v0.5</b>
+                          f"""<b>Network Test Tool v{__version__}</b>
                           <p>A modern network diagnostic and troubleshooting utility.</p>
                           <p>Developed by droltr.</p>
+                          <p>Includes speedtest-cli by Matt Martz (Apache 2.0), IBM Plex Sans and
+                          JetBrains Mono (SIL OFL 1.1). Built with PyQt5 (GPL v3) and psutil (BSD).
+                          See THIRD_PARTY_NOTICES.md.</p>
                           <p><a href='https://github.com/droltr/Network_Test_Tool'>GitHub Repository</a></p>""")

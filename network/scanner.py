@@ -4,6 +4,8 @@ import ipaddress
 from typing import List, Dict, Optional, Callable
 import time
 
+from utils.paths import command_env
+
 
 class PortScanner:
     """Advanced port scanner with threading support and progress tracking."""
@@ -133,7 +135,7 @@ class NetworkScanner:
             param = '-n' if platform.system().lower() == 'windows' else '-c'
             command = ['ping', param, '1', host]
             
-            result = subprocess.run(command, capture_output=True, timeout=timeout)
+            result = subprocess.run(command, capture_output=True, timeout=timeout, env=command_env())
             return result.returncode == 0
             
         except Exception:
