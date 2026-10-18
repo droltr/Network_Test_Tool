@@ -111,7 +111,7 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for de
 ## Third-Party Components
 
 This project bundles [speedtest-cli](https://github.com/sivel/speedtest-cli) by Matt Martz
-(Apache 2.0, unmodified, in `utils/speedtest.py`), the IBM Plex Sans and JetBrains Mono
+(Apache 2.0, unmodified, in `utils/speedtest.py`), the IBM Plex Sans, JetBrains Mono and Jost
 fonts (SIL OFL 1.1) and a snapshot of the [public iPerf3 server list](https://github.com/R0GGER/public-iperf3-servers)
 by R0GGER (MIT). The iPerf3 feature is an independent implementation of the iperf3 protocol
 (no ESnet code included). It depends on PyQt5 (GPL v3) and psutil (BSD-3-Clause). See

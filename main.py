@@ -27,7 +27,12 @@ def main():
         # Matches the .desktop file so Linux shells group the window correctly
         app.setDesktopFileName("network-test-tool")
 
-        from gui.styles.modern_theme import load_fonts, ui_font
+        from PyQt5.QtCore import QSettings
+        from gui.styles.modern_theme import apply_theme, load_fonts, ui_font, DEFAULT_THEME
+        # The theme must be active before any widget is built; NTT_THEME overrides it for testing
+        theme = os.environ.get("NTT_THEME") or QSettings("NetworkTools", "NetworkTestTool").value(
+            "theme", DEFAULT_THEME, type=str)
+        apply_theme(theme)
         load_fonts()
         app.setFont(ui_font(12.5))
 

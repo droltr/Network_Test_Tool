@@ -184,7 +184,7 @@ class SpeedTestPage(Page):
         panes.addWidget(gauge_card)
         live_card = Card(margins=(16, 14, 16, 12))
         live_card.body.addWidget(section_label("Throughput"))
-        self.live_chart = ThroughputChart(Colors.BLUE)
+        self.live_chart = ThroughputChart(Colors.SERIES_DOWN)
         live_card.body.addWidget(self.live_chart, 1)
         panes.addWidget(live_card, 1)
         rl.addLayout(panes, 1)
@@ -198,8 +198,8 @@ class SpeedTestPage(Page):
         sl.setSpacing(12)
         heroes = QHBoxLayout()
         heroes.setSpacing(12)
-        self.hero_down = HeroCard("Download", Colors.BLUE, "Mbps")
-        self.hero_up = HeroCard("Upload", Colors.GREEN, "Mbps")
+        self.hero_down = HeroCard("Download", Colors.SERIES_DOWN, "Mbps")
+        self.hero_up = HeroCard("Upload", Colors.SERIES_UP, "Mbps")
         self.hero_ping = HeroCard("Ping", Colors.YELLOW, "ms")
         for hero in (self.hero_down, self.hero_up, self.hero_ping):
             heroes.addWidget(hero, 1)
@@ -208,8 +208,8 @@ class SpeedTestPage(Page):
         charts = QHBoxLayout(self.charts_row)
         charts.setContentsMargins(0, 0, 0, 0)
         charts.setSpacing(12)
-        self.down_chart = ChartCard("Download throughput", Colors.BLUE)
-        self.up_chart = ChartCard("Upload throughput", Colors.GREEN)
+        self.down_chart = ChartCard("Download throughput", Colors.SERIES_DOWN)
+        self.up_chart = ChartCard("Upload throughput", Colors.SERIES_UP)
         charts.addWidget(self.down_chart, 1)
         charts.addWidget(self.up_chart, 1)
         sl.addWidget(self.charts_row, 1)
@@ -318,7 +318,7 @@ class SpeedTestPage(Page):
             cell.set_state("pending")
         self.steps["server"].set_state("active")
         self.gauge.set_value(None, Colors.BLUE, "", "Mbps")
-        self.live_chart.reset(Colors.BLUE)
+        self.live_chart.reset(Colors.SERIES_DOWN)
         self.views.setCurrentWidget(self.running_view)
 
         self.test_thread = SpeedTestThread("full", parent=self)
@@ -346,11 +346,11 @@ class SpeedTestPage(Page):
         elif kind == "ping":
             self.steps["ping"].set_state("done", f"{value:.1f} ms", Colors.YELLOW)
             self.steps["download"].set_state("active", percent=0)
-            self.gauge.set_value(None, Colors.BLUE, "Download", "Mbps ↓")
+            self.gauge.set_value(None, Colors.SERIES_DOWN, "Download", "Mbps ↓")
         elif kind == "sample":
             phase, seconds, mbps = value
             self.samples[phase].append((seconds, mbps))
-            color = Colors.BLUE if phase == "download" else Colors.GREEN
+            color = Colors.SERIES_DOWN if phase == "download" else Colors.SERIES_UP
             if self.live_chart.color != color:
                 self.live_chart.reset(color)
             self.live_chart.add(seconds, mbps)
@@ -358,11 +358,11 @@ class SpeedTestPage(Page):
             self.steps[phase].value.setText(f"{mbps:.1f} Mbps")
             self.steps[phase].value.set_color(Colors.TEXT_STRONG)
         elif kind == "download":
-            self.steps["download"].set_state("done", f"{value:.1f} Mbps", Colors.BLUE)
+            self.steps["download"].set_state("done", f"{value:.1f} Mbps", Colors.SERIES_DOWN)
             self.steps["upload"].set_state("active", percent=0)
-            self.gauge.set_value(None, Colors.GREEN, "Upload", "Mbps ↑")
+            self.gauge.set_value(None, Colors.SERIES_UP, "Upload", "Mbps ↑")
         elif kind == "upload":
-            self.steps["upload"].set_state("done", f"{value:.1f} Mbps", Colors.GREEN)
+            self.steps["upload"].set_state("done", f"{value:.1f} Mbps", Colors.SERIES_UP)
 
     def stop_test(self):
         if self.ping_thread and self.ping_thread.isRunning():

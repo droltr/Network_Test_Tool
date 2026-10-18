@@ -1,30 +1,60 @@
-# User Guide: Network Status
+# Dashboard
 
-The **Network Status** tab is the main dashboard of the application. It provides an immediate overview of your computer's network health.
+The Dashboard is the overview page. It refreshes every 10 seconds.
 
-## 🖥️ Interface Overview
+## Connection path
 
-### 1. Status Indicator
-Located in the top-right corner, this round indicator shows your global connectivity state:
-*   🟢 **Online**: Connected to the internet (Ping to 8.8.8.8 successful).
-*   🟡 **Local Only**: Connected to a gateway but no internet access.
-*   🔴 **Offline**: No network connection detected.
+**This PC → Gateway → DNS → Internet**, with the latency of each link above the line.
 
-### 2. Diagnostics Panel
-This panel appears at the top of the window and displays:
-*   **System Health**: "✓ System Healthy" if no issues are found.
-*   **Warnings/Critical Issues**: Lists detected problems (e.g., "APIPA address detected", "Gateway unreachable") with suggested solutions.
+| What you see | Meaning |
+|---|---|
+| All nodes OK | The connection works up to the internet. |
+| Gateway failed | This computer cannot reach the router: cable, Wi-Fi, adapter or router problem. |
+| DNS failed, gateway OK | Names cannot be looked up; websites fail although the line works. |
+| Internet failed, gateway OK | The router answers but the internet does not: internet provider or modem problem. |
+| Hollow node | Not tested because an earlier link failed. |
 
-### 3. Quick Actions
-Perform common network maintenance tasks with one click:
-*   **Adapter Selection**: Choose "All Adapters" or a specific interface from the dropdown.
-*   **Renew IP**: Runs `ipconfig /renew`. Useful for DHCP issues.
-*   **Flush DNS**: Runs `ipconfig /flushdns`. Useful for website loading errors.
-*   **Release IP**: Runs `ipconfig /release`. Disconnects the adapter from the current IP.
-*   **Generate Report**: Creates a comprehensive status report.
+The status card at the bottom of the menu summarises the same result: **Online**,
+**Local only** (network but no internet) or **Offline**.
 
-### 4. Adapter Cards
-Each network interface (Wi-Fi, Ethernet, etc.) is displayed as a card.
-*   **Sorting**: Active and problematic (APIPA) adapters are always shown at the top.
-*   **Information**: Displays Name, Status, IP Address, MAC Address, Gateway, and DNS Servers.
-*   **APIPA Warning**: If an adapter has an IP starting with `169.254.x.x`, it is flagged with a yellow "⚠ APIPA" badge.
+## Issues
+
+When problems are found, an Issues card lists them with the evidence and a fix button:
+
+- **APIPA address** (169.254.x.x): the adapter got no address from DHCP → **Renew IP**.
+- **DNS resolution failed** → **Flush DNS**, or switch to 8.8.8.8 / 1.1.1.1.
+- **Gateway unreachable** or **No default gateway** → **Troubleshoot** or **Renew IP**.
+- **Multiple active adapters** (physical ones only): traffic may take the wrong one.
+
+## Gateway latency
+
+A live chart of the round-trip time to your router over the last 10 minutes, measured
+every 2 seconds while the Dashboard is open. Spikes here point to a busy or failing local
+network (Wi-Fi interference, an overloaded router).
+
+## Adapters
+
+Every network adapter except loopback, active ones first: name, state (**Active**,
+**Limited** for APIPA, **Inactive**), IPv4 address and MAC address.
+
+## Quick actions
+
+Pick **All adapters** or one adapter, then:
+
+- **Renew IP** asks DHCP for a new address (Linux: re-activates the NetworkManager
+  connection).
+- **Flush DNS** clears the DNS cache.
+- **Release IP** gives the address back; the connection drops until you renew. The app
+  asks before doing this.
+
+These change your system, so they may ask for your password.
+
+## Last speed test and recent tests
+
+The last speed test result and the latest results of every tool. **Open** shows a stored
+result on its page.
+
+## Generate report
+
+Saves a text report with system information, detected issues, adapters, gateway, DNS
+and the ARP table. See [Reports, exports and log files](Reporting.md).

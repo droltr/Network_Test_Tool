@@ -14,6 +14,7 @@ app_name = f"NetworkTestTool-{__version__}-{os_name}-{arch}"
 datas = [
     ("assets", "assets"),
     ("licenses", "licenses"),
+    ("docs", "docs"),            # in-app user guide
     ("LICENSE", "."),
     ("THIRD_PARTY_NOTICES.md", "."),
 ]

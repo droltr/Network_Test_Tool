@@ -225,7 +225,7 @@ class IperfPage(Page):
         self.host_input = LineInput("host or IP", height=34)
         self.host_input.setText(self.settings.value("host", "", type=str))
         self.port_input = LineInput("5201", height=34)
-        self.port_input.setFixedWidth(110)
+        self.port_input.setFixedWidth(128)
         self.port_input.setText(self.settings.value("ports", "5201", type=str))
         self.port_input.setToolTip("A port or a range such as 5201-5209. Busy ports are skipped.")
         for field in (self.host_input, self.port_input):
@@ -252,14 +252,16 @@ class IperfPage(Page):
         form.body.addLayout(hbox(Label("Server", 12, color=Colors.TEXT_MUTED), self.host_input, 6,
                                  Label("Port", 12, color=Colors.TEXT_MUTED), self.port_input, 6,
                                  self.run_btn, self.stop_btn, spacing=8))
-        form.body.addLayout(hbox(Label("Direction", 12, color=Colors.TEXT_MUTED), direction_row, 12,
-                                 Label("Streams", 12, color=Colors.TEXT_MUTED), self.streams_combo, 12,
-                                 Label("Duration", 12, color=Colors.TEXT_MUTED), self.duration_combo,
-                                 "stretch", spacing=6))
+        form.body.addLayout(hbox(Label("Direction", 12, color=Colors.TEXT_MUTED), direction_row, 18,
+                                 Label("Streams", 12, color=Colors.TEXT_MUTED), self.streams_combo, "stretch",
+                                 spacing=6))
+        form.body.addLayout(hbox(Label("Duration", 12, color=Colors.TEXT_MUTED), self.duration_combo, "stretch",
+                                 spacing=6))
         self.command_label = Label("", 11.5, color=Colors.TEXT_MUTED, mono=True)
+        self.command_label.setWordWrap(True)
         self.command_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         copy_cmd = link_button("Copy command")
-        copy_cmd.clicked.connect(lambda: QApplication.clipboard().setText(self.command_label.text()))
+        copy_cmd.clicked.connect(lambda: QApplication.clipboard().setText(self.command_text))
         terminal_label = Label("Same test in a terminal:", 11.5, color=Colors.TEXT_MUTED)
         terminal_label.setAlignment(Qt.AlignTop)
         self.command_label.setAlignment(Qt.AlignTop)
@@ -286,7 +288,7 @@ class IperfPage(Page):
         chart_card = Card(margins=(16, 12, 16, 10))
         self.live_title = section_label("Throughput")
         chart_card.body.addWidget(self.live_title)
-        self.live_chart = ThroughputChart(Colors.BLUE)
+        self.live_chart = ThroughputChart(Colors.SERIES_DOWN)
         chart_card.body.addWidget(self.live_chart, 1)
         ll.addWidget(chart_card, 1)
         self.client_views.addWidget(live)
@@ -298,15 +300,15 @@ class IperfPage(Page):
         dl.setSpacing(12)
         cards = QHBoxLayout()
         cards.setSpacing(12)
-        self.download_card = ResultCard("Download", Colors.BLUE)
-        self.upload_card = ResultCard("Upload", Colors.GREEN)
+        self.download_card = ResultCard("Download", Colors.SERIES_DOWN)
+        self.upload_card = ResultCard("Upload", Colors.SERIES_UP)
         cards.addWidget(self.download_card, 1)
         cards.addWidget(self.upload_card, 1)
         dl.addLayout(cards)
         charts = QHBoxLayout()
         charts.setSpacing(12)
-        self.download_chart = ThroughputChart(Colors.BLUE)
-        self.upload_chart = ThroughputChart(Colors.GREEN)
+        self.download_chart = ThroughputChart(Colors.SERIES_DOWN)
+        self.upload_chart = ThroughputChart(Colors.SERIES_UP)
         for title, chart in (("Download · Mbps per second", self.download_chart),
                              ("Upload · Mbps per second", self.upload_chart)):
             card = Card(margins=(16, 12, 16, 10))
@@ -410,7 +412,9 @@ class IperfPage(Page):
                     + iperf_command(host, ports[0], "upload", streams, duration))
         else:
             text = iperf_command(host, ports[0], direction, streams, duration)
-        self.command_label.setText(text)
+        self.command_text = text
+        # Non-breaking hyphens keep options like -p 30001 on one line when the label wraps
+        self.command_label.setText(text.replace("-", "\u2011"))
 
     def start_client(self):
         if self.client_running:
@@ -440,7 +444,7 @@ class IperfPage(Page):
         self.client_thread.start()
 
     def on_phase(self, direction, port):
-        color = Colors.BLUE if direction == "download" else Colors.GREEN
+        color = Colors.SERIES_DOWN if direction == "download" else Colors.SERIES_UP
         self.samples[direction] = []
         self.live_chart.reset(color)
         self.live_title.setText(f"{direction.upper()} · {self.host_input.text().strip()}:{port}")
@@ -449,7 +453,7 @@ class IperfPage(Page):
     def on_interval(self, direction, seconds, value):
         self.samples[direction].append((seconds, value))
         self.live_chart.add(seconds, value)
-        color = Colors.BLUE if direction == "download" else Colors.GREEN
+        color = Colors.SERIES_DOWN if direction == "download" else Colors.SERIES_UP
         self.gauge.set_value(value, color)
 
     def stop_client(self):
@@ -565,7 +569,7 @@ class IperfPage(Page):
         live_card = Card(margins=(16, 12, 16, 10))
         self.server_live_title = section_label("Live throughput")
         live_card.body.addWidget(self.server_live_title)
-        self.server_chart = ThroughputChart(Colors.BLUE)
+        self.server_chart = ThroughputChart(Colors.SERIES_DOWN)
         live_card.body.addWidget(self.server_chart, 1)
         row.addWidget(live_card, 1)
         layout.addLayout(row, 1)
@@ -629,7 +633,7 @@ class IperfPage(Page):
         elif kind == 'client':
             direction = "this computer sends (-R)" if data['reverse'] else "client sends"
             self.server_status.setText(f"Testing with {data['address']}")
-            self.server_chart.reset(Colors.BLUE if data['reverse'] else Colors.GREEN)
+            self.server_chart.reset(Colors.SERIES_DOWN if data['reverse'] else Colors.SERIES_UP)
             self.server_live_title.setText(f"LIVE · {data['address']} · {direction}")
             self.server_log.append_line(f"Accepted {data['address']}: {data['parallel']} stream(s), "
                                         f"{data['duration']:.0f} s, {direction}. Client: {data['version']}")

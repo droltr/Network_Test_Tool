@@ -30,6 +30,14 @@ license texts are in `licenses/`.
 - Copyright 2020 The JetBrains Mono Project Authors
 - License: SIL Open Font License 1.1 — `licenses/jetbrains-mono-ofl-1.1.txt`
 
+### Jost
+
+- Files: `assets/fonts/Jost-400-Book.ttf`, `Jost-500-Medium.ttf`, `Jost-600-Semi.ttf`,
+  `Jost-700-Bold.ttf` (UI font of the Bauhaus themes; font family name "Jost*")
+- Source: https://github.com/indestructible-type/Jost
+- Copyright 2020 The Jost Project Authors
+- License: SIL Open Font License 1.1 — `licenses/jost-ofl-1.1.txt`
+
 ### Public iPerf3 server list
 
 - File: `assets/data/iperf3-servers.json` (snapshot of 2026-10-10, normalized to this app's

@@ -2,13 +2,14 @@
 import re
 from datetime import datetime
 
-from PyQt5.QtCore import Qt, QPropertyAnimation, QEasingCurve, pyqtSignal, QRectF, QTimer
-from PyQt5.QtGui import QPainter, QPen, QColor, QTextCharFormat, QTextBlockFormat, QTextCursor, QFontMetrics
+from PyQt5.QtCore import Qt, QPropertyAnimation, QEasingCurve, pyqtSignal, QRectF, QTimer, QPointF
+from PyQt5.QtGui import (QPainter, QPen, QColor, QTextCharFormat, QTextBlockFormat, QTextCursor, QFontMetrics,
+                         QPolygonF)
 from PyQt5.QtWidgets import (QWidget, QFrame, QLabel, QPushButton, QHBoxLayout, QVBoxLayout,
                              QGraphicsOpacityEffect, QPlainTextEdit, QTableWidget, QHeaderView,
                              QAbstractItemView, QSizePolicy, QCheckBox, QLineEdit, QButtonGroup)
 
-from gui.styles.modern_theme import Colors, ui_font, mono_font, section_font, rgba
+from gui.styles.modern_theme import Colors, Theme, ui_font, mono_font, section_font, rgba
 
 
 # ---------------------------------------------------------------- helpers
@@ -210,6 +211,17 @@ class StatusDot(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         rect = QRectF(2, 2, self._size, self._size)
         color = QColor(self._color)
+        if Theme.SHAPES and self._style == "filled" and self._color in (Colors.RED, Colors.YELLOW):
+            # Bauhaus themes code status by shape too: square = problem, triangle = warning
+            p.setPen(Qt.NoPen)
+            p.setBrush(color)
+            if self._color == Colors.RED:
+                p.drawRect(rect)
+            else:
+                p.drawPolygon(QPolygonF([QPointF(rect.center().x(), rect.top()),
+                                         QPointF(rect.right() + 1, rect.bottom() + 1),
+                                         QPointF(rect.left() - 1, rect.bottom() + 1)]))
+            return
         if self._style == "filled":
             p.setPen(Qt.NoPen)
             p.setBrush(color)
@@ -308,10 +320,11 @@ class Badge(QLabel):
 
     def set_tone(self, color, filled=False):
         if filled:
-            style = f"background: {color}; color: {Colors.CHROME};"
+            style = f"background: {color}; color: {Colors.ON_STATUS};"
         else:
             style = f"background: {rgba(color, 0.14)}; color: {color};"
-        self.setStyleSheet(f"QLabel {{ {style} border-radius: 8px; padding: 1px 7px; }}")
+        radius = 0 if Theme.BAUHAUS else 8
+        self.setStyleSheet(f"QLabel {{ {style} border-radius: {radius}px; padding: 1px 7px; }}")
 
 
 class StatStrip(QFrame):

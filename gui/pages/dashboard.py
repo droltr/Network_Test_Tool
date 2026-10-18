@@ -404,8 +404,8 @@ class DashboardPage(Page):
         self.speed_title.setText(f"LAST SPEED TEST · {relative_time(entry['time']).upper()}")
         data = entry.get('data', {})
         for title, color, value, unit in (
-                ("Download", Colors.BLUE, data.get('download_speed'), "Mbps"),
-                ("Upload", Colors.GREEN, data.get('upload_speed'), "Mbps"),
+                ("Download", Colors.SERIES_DOWN, data.get('download_speed'), "Mbps"),
+                ("Upload", Colors.SERIES_UP, data.get('upload_speed'), "Mbps"),
                 ("Ping", Colors.YELLOW, data.get('ping'), "ms")):
             column = QVBoxLayout()
             column.setSpacing(2)
