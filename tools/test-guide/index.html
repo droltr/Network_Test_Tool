@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test Guide</title>
+<style>
+:root {
+  --bg: #f6f7f9; --card: #ffffff; --text: #1d2330; --muted: #5d6675; --line: #dde1e7;
+  --accent: #2f6fde; --pass: #1e8a4c; --fail: #c62f2f; --skip: #8a6d1e; --kbd: #eef1f5;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15181e; --card: #1e222a; --text: #e4e7ec; --muted: #9aa3b2; --line: #2e333d;
+    --accent: #6b9cff; --pass: #4cc283; --fail: #ff6b6b; --skip: #e0bd55; --kbd: #2a2f39;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.5 system-ui, "Noto Sans", sans-serif; }
+header { position: sticky; top: 0; z-index: 2; background: var(--card);
+  border-bottom: 1px solid var(--line); padding: 12px 16px; }
+header h1 { margin: 0; font-size: 18px; }
+header .target { color: var(--muted); font-size: 13px; }
+.project { font-size: 13px; margin: 2px 0; overflow-wrap: anywhere; }
+.project b { color: var(--accent); }
+.project.bad { color: #fff; background: var(--fail); padding: 6px 10px; border-radius: 6px; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 6px; }
+.progress { color: var(--muted); }
+.counts span { margin-right: 10px; }
+.c-pass { color: var(--pass); } .c-fail { color: var(--fail); } .c-skip { color: var(--skip); }
+button { font: inherit; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--card); color: var(--text); cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+main { max-width: 960px; margin: 0 auto; padding: 16px; }
+nav a { color: var(--accent); margin-right: 12px; text-decoration: none; }
+section { margin-top: 24px; }
+section > h2 { font-size: 17px; margin: 0 0 4px; }
+section > p { margin: 0 0 10px; color: var(--muted); }
+.test { background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--line);
+  border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+.test.pass { border-left-color: var(--pass); }
+.test.fail { border-left-color: var(--fail); }
+.test.skip { border-left-color: var(--skip); }
+.test h3 { margin: 0 0 6px; font-size: 15px; }
+.test .id { color: var(--muted); font-weight: normal; margin-right: 6px; }
+.label { font-weight: 600; color: var(--muted); font-size: 13px; text-transform: uppercase;
+  letter-spacing: .03em; margin-top: 6px; }
+ol { margin: 2px 0 6px; padding-left: 22px; }
+kbd { background: var(--kbd); border: 1px solid var(--line); border-radius: 4px;
+  padding: 0 5px; font: 13px ui-monospace, monospace; }
+code { background: var(--kbd); border-radius: 4px; padding: 0 4px; font: 13px ui-monospace, monospace;
+  overflow-wrap: anywhere; }
+.result { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; align-items: center; }
+.result label { cursor: pointer; }
+textarea { width: 100%; min-height: 38px; margin-top: 6px; font: inherit; color: var(--text);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
+.note { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+#status { margin-left: auto; }
+select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; max-width: 70vw; }
+#error { color: var(--fail); padding: 16px; }
+#preflight { margin-top: 12px; }
+#preflight h2 { font-size: 16px; margin: 0 0 6px; }
+#preflight ul { list-style: none; margin: 6px 0; padding: 0; }
+#preflight li { padding: 4px 0; border-top: 1px solid var(--line); }
+#preflight .mark { display: inline-block; width: 1.4em; font-weight: 700; }
+#preflight .ok { color: var(--pass); } #preflight .bad { color: var(--fail); } #preflight .info { color: var(--muted); }
+#preflight .detail { color: var(--muted); font-size: 13px; margin-left: 1.4em; overflow-wrap: anywhere; }
+#preflight .banner { padding: 6px 10px; border-radius: 6px; font-weight: 600; }
+#preflight .banner.ok { background: var(--pass); color: #fff; }
+#preflight .banner.bad { background: var(--fail); color: #fff; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Test Guide</h1>
+  <div class="project" id="project"></div>
+  <div class="target" id="target"></div>
+  <div class="target"><label>Session <select id="session"></select></label> <span id="change"></span></div>
+  <div class="bar">
+    <span class="progress" id="progress"></span>
+    <span class="counts" id="counts"></span>
+    <button class="primary" id="report">Create report</button>
+    <button id="reset">Clear results</button>
+    <span id="status"></span>
+  </div>
+</header>
+<main>
+  <div id="error" hidden></div>
+  <div class="note">
+    <div id="setup"></div>
+    <p>For each test: follow the steps, compare with the expected result, mark
+    <b>Pass</b>, <b>Fail</b> or <b>Skipped</b> and add a note when something differs.
+    Results are kept in this browser until you clear them. <b>Create report</b> saves the
+    results to the project folder (<code>.private/test-reports/&lt;session&gt;/</code>). Earlier sessions stay available in the Session list.</p>
+  </div>
+  <div class="note" id="preflight">
+    <h2>Pre-flight checks</h2>
+    <div class="banner" id="pf-banner">Running checks&hellip;</div>
+    <ul id="pf-list"></ul>
+    <button id="pf-rerun">Run checks again</button>
+    <label id="pf-ack-row" hidden><input type="checkbox" id="pf-ack"> I know the pre-flight failed and want to record these results anyway</label>
+  </div>
+  <nav id="toc"></nav>
+  <div id="sections"></div>
+  <section>
+    <h2>General notes</h2>
+    <textarea id="general" placeholder="Anything else you noticed"></textarea>
+  </section>
+</main>
+<script>
+// The guide is data: title, target, setup text and all tests come from tests.json. The test text is
+// written by the maintainers/agents of the project and is inserted as HTML on purpose (<kbd>, <code>).
+let GUIDE = null, SECTIONS = [], KEY = "test-guide", SESSION = "", INFO = null, SHA = "", PREFLIGHT = null, state = {};
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} };
+const all = () => SECTIONS.flatMap(s => s.tests);
+const $ = id => document.getElementById(id);
+
+function render() {
+  $("toc").innerHTML = SECTIONS.map(s => `<a href="#${s.id}">${s.title}</a>`).join("");
+  $("sections").innerHTML = SECTIONS.map(s => `
+    <section id="${s.id}"><h2>${s.title}</h2>${s.intro ? `<p>${s.intro}</p>` : ""}
+    ${s.tests.map(t => `
+      <div class="test" id="t-${t.id}">
+        <h3><span class="id">${t.id}</span>${t.title}</h3>
+        <div class="label">How</div><ol>${t.steps.map(x => `<li>${x}</li>`).join("")}</ol>
+        <div class="label">Expected</div><div>${t.expected}</div>
+        <div class="result">
+          ${["pass", "fail", "skip"].map(r => `<label><input type="radio" name="r-${t.id}" value="${r}">
+            ${{ pass: "Pass", fail: "Fail", skip: "Skipped" }[r]}</label>`).join("")}
+        </div>
+        <textarea data-id="${t.id}" placeholder="Note (what happened, if different)"></textarea>
+      </div>`).join("")}
+    </section>`).join("");
+  for (const t of all()) {
+    const st = state[t.id] || {};
+    if (st.result) document.querySelector(`input[name="r-${t.id}"][value="${st.result}"]`).checked = true;
+    document.querySelector(`textarea[data-id="${t.id}"]`).value = st.note || "";
+  }
+  $("general").value = state._general || "";
+  update();
+}
+
+function update() {
+  const c = { pass: 0, fail: 0, skip: 0 };
+  for (const t of all()) {
+    const r = (state[t.id] || {}).result;
+    if (r) c[r]++;
+    $("t-" + t.id).className = "test" + (r ? " " + r : "");
+  }
+  const done = c.pass + c.fail + c.skip;
+  $("progress").textContent = `${done} / ${all().length} tested`;
+  $("counts").innerHTML =
+    `<span class="c-pass">Pass ${c.pass}</span><span class="c-fail">Fail ${c.fail}</span><span class="c-skip">Skipped ${c.skip}</span>`;
+}
+
+document.addEventListener("change", e => {
+  const m = e.target.name && e.target.name.match(/^r-(.+)$/);
+  if (m) { state[m[1]] = { ...(state[m[1]] || {}), result: e.target.value }; save(); update(); }
+});
+document.addEventListener("input", e => {
+  if (e.target.dataset.id) { state[e.target.dataset.id] = { ...(state[e.target.dataset.id] || {}), note: e.target.value }; save(); }
+  if (e.target.id === "general") { state._general = e.target.value; save(); }
+});
+$("reset").onclick = () => {
+  if (confirm("Clear all results and notes?")) { state = {}; save(); render(); }
+};
+$("report").onclick = async () => {
+  if (!GUIDE || !INFO) return;
+  const report = {
+    created: new Date().toISOString(),
+    guide: KEY,
+    project: INFO.project,
+    project_path: INFO.path,
+    session: SESSION,
+    tests_sha256: SHA,
+    ack_preflight_failure: $("pf-ack").checked,
+    target: GUIDE.target || "",
+    general_notes: state._general || "",
+    results: SECTIONS.map(s => ({ section: s.title, tests: s.tests.map(t => ({
+      id: t.id, title: t.title, expected: t.expected,
+      result: (state[t.id] || {}).result || "not tested", note: (state[t.id] || {}).note || "" })) })),
+  };
+  const status = $("status");
+  if (PREFLIGHT && !PREFLIGHT.ok && !$("pf-ack").checked) {
+    status.textContent = "Pre-flight failed: fix the setup and run the checks again, or tick the box to record anyway.";
+    return;
+  }
+  try {
+    const res = await fetch("/api/report", { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(report) });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || res.status);
+    status.textContent = "Saved: " + body.files.join(", ");
+  } catch (err) {
+    status.textContent = "Could not save to the project folder (" + err.message + "). Downloaded instead.";
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: "application/json" }));
+    a.download = "test-report-" + report.created.replace(/[:.]/g, "-") + ".json";
+    a.click();
+  }
+};
+
+async function runPreflight() {
+  const banner = $("pf-banner"), list = $("pf-list");
+  banner.className = "banner"; banner.textContent = "Running checks\u2026"; list.innerHTML = "";
+  try {
+    const res = await fetch("/api/preflight", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session: SESSION }) });
+    PREFLIGHT = await res.json();
+    if (!res.ok) throw new Error(PREFLIGHT.error || res.status);
+  } catch (err) {
+    PREFLIGHT = { ok: false, results: [] };
+    banner.className = "banner bad"; banner.textContent = "Pre-flight could not run (" + err.message + ")";
+    $("pf-ack-row").hidden = false;
+    return;
+  }
+  for (const r of PREFLIGHT.results) {
+    const li = document.createElement("li");
+    const cls = r.ok ? (r.info ? "info" : "ok") : "bad";
+    const mark = document.createElement("span"); mark.className = "mark " + cls; mark.textContent = r.ok ? (r.info ? "i" : "\u2713") : "\u2717";
+    const title = document.createElement("span"); title.textContent = r.title;
+    const detail = document.createElement("div"); detail.className = "detail";
+    detail.textContent = (r.command ? "$ " + r.command + "\n" : "") + r.detail + (!r.ok && r.hint ? "\nHint: " + r.hint : "");
+    detail.style.whiteSpace = "pre-wrap";
+    li.append(mark, title, detail); list.append(li);
+  }
+  const failed = PREFLIGHT.results.filter(r => !r.ok && !r.info).length;
+  banner.className = "banner " + (PREFLIGHT.ok ? "ok" : "bad");
+  banner.textContent = PREFLIGHT.ok ? "All pre-flight checks passed" + (PREFLIGHT.target_version ? " (tested version " + PREFLIGHT.target_version + ")" : "")
+    : failed + " pre-flight check(s) failed: results may not describe the version you are testing";
+  $("pf-ack-row").hidden = PREFLIGHT.ok;
+  if (PREFLIGHT.ok) $("pf-ack").checked = false;
+}
+$("pf-rerun").onclick = runPreflight;
+
+async function start() {
+  try {
+    INFO = await (await fetch("/api/info", { cache: "no-store" })).json();
+    const list = await (await fetch("/api/sessions", { cache: "no-store" })).json();
+    if (!list.length) throw new Error("no sessions in tests/user/");
+    const wanted = new URLSearchParams(location.search).get("session");
+    SESSION = (list.find(x => x.name === wanted) || list[0]).name;
+    $("session").innerHTML = list.map(x =>
+      `<option value="${x.name}"${x.name === SESSION ? " selected" : ""}>${x.name} (${x.tests} tests)</option>`).join("");
+    $("session").onchange = () => { location.search = "?session=" + encodeURIComponent($("session").value); };
+    const res = await fetch("/tests.json?session=" + encodeURIComponent(SESSION), { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    SHA = res.headers.get("X-Tests-Sha256") || "";
+    GUIDE = await res.json();
+    const mismatch = (GUIDE.project || "") !== INFO.project;
+    $("project").className = "project" + (mismatch ? " bad" : "");
+    $("project").innerHTML = "Project: <b></b> &middot; <span></span>";
+    $("project").querySelector("b").textContent = INFO.project;
+    $("project").querySelector("span").textContent = INFO.path;
+    if (mismatch) {
+      $("project").append(" \u2014 WRONG PROJECT: these tests belong to " + (GUIDE.project || "(unnamed)") + ". Reports are disabled.");
+      $("report").disabled = true;
+    }
+    SECTIONS = GUIDE.sections;
+    KEY = (GUIDE.guide || ("test-guide:" + SESSION)) + "@" + INFO.project;
+    document.title = GUIDE.title || document.title;
+    $("title").textContent = GUIDE.title || "Test Guide";
+    $("target").textContent = GUIDE.target || "";
+    $("change").textContent = GUIDE.change ? "Change: " + GUIDE.change : "";
+    $("setup").innerHTML = GUIDE.setup || "";
+  } catch (err) {
+    $("error").hidden = false;
+    $("error").textContent = "Could not load the test guide (" + err.message + "). Start it with tools/test-guide/launch.sh.";
+    return;
+  }
+  try { state = JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { state = {}; }
+  render();
+  runPreflight();
+}
+start();
+</script>
+</body>
+</html>

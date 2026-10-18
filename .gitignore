@@ -48,3 +48,6 @@ reports/
 !requirements.txt
 !licenses/*.txt
 !assets/data/*.json
+
+# Local-only: private notes, test reports
+.private/
