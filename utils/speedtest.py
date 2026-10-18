@@ -181,8 +181,9 @@ except ImportError:
     try:
         _py3_utf8_stdout = _Py3Utf8Output(sys.stdout)
         _py3_utf8_stderr = _Py3Utf8Output(sys.stderr)
-    except OSError:
+    except (OSError, AttributeError):
         # sys.stdout/sys.stderr is not a compatible stdout/stderr object
+        # (AttributeError: None in a windowed build, console=False)
         # just use it and hope things go ok
         _py3_utf8_stdout = sys.stdout
         _py3_utf8_stderr = sys.stderr
