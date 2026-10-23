@@ -2,8 +2,9 @@
 import html
 
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtWidgets import QWidget, QFrame, QHBoxLayout, QVBoxLayout, QFileDialog, QScrollArea
+from PyQt5.QtWidgets import QWidget, QFrame, QHBoxLayout, QVBoxLayout, QScrollArea
 
+from gui.file_dialogs import get_save_file_name
 from gui.styles import modern_theme
 from gui.styles.modern_theme import Colors, mono_font, ui_font
 from gui.widgets.common import Label
@@ -99,11 +100,8 @@ class Page(QWidget):
         """Stop threads and timers before the window closes."""
 
     def save_text(self, title, default_name, text):
-        """Keep the existing QFileDialog export flow. Returns the chosen path or None."""
-        options = QFileDialog.Options()
-        options |= QFileDialog.DontUseNativeDialog
-        path, _ = QFileDialog.getSaveFileName(self, title, default_name,
-                                              "Text Files (*.txt);;All Files (*)", options=options)
+        """Ask where to save text (native dialog where available). Returns the chosen path or None."""
+        path = get_save_file_name(self, title, default_name, "Text Files (*.txt);;All Files (*)")
         if not path:
             return None
         with open(path, 'w', encoding='utf-8') as f:

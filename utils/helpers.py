@@ -14,5 +14,7 @@ def is_valid_port(port):
     return isinstance(port, int) and 0 <= port <= 65535
 
 def log_message(message):
-    with open("network_tools.log", "a") as log_file:
+    # Per-user state directory, not the working directory (read-only in an installed build)
+    from utils.paths import log_file_path
+    with open(log_file_path("network_tools.log"), "a", encoding="utf-8") as log_file:
         log_file.write(f"{message}\n")

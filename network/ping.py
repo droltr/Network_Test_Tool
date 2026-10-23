@@ -5,7 +5,7 @@ import socket
 import statistics
 from datetime import datetime
 
-from utils.paths import command_env
+from utils.paths import command_env, console_encoding
 
 class PingTester:
     def __init__(self):
@@ -113,7 +113,8 @@ class PingTester:
             else:
                 cmd = ["ping", "-c", "1", "-W", str(timeout), host]
             
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 1, env=command_env())
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 1, env=command_env(),
+                                    encoding=console_encoding(), errors="replace")
             
             if result.returncode == 0:
                 output = result.stdout.lower()

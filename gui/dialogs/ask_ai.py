@@ -4,8 +4,9 @@ import os
 from PyQt5.QtCore import Qt, QThread, QSettings, QStandardPaths, QUrl, pyqtSignal
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import (QDialog, QHBoxLayout, QVBoxLayout, QWidget, QCheckBox, QComboBox, QPlainTextEdit,
-                             QListWidget, QListWidgetItem, QFileDialog, QApplication, QAbstractItemView)
+                             QListWidget, QListWidgetItem, QApplication, QAbstractItemView)
 
+from gui.file_dialogs import get_existing_directory, get_save_file_name
 from gui.recent import recent_store, KIND_TITLES
 from gui.styles.modern_theme import Colors, mono_font, ui_font
 from gui.widgets.common import (Card, Label, LineInput, section_label, button, link_button, hbox, chip_group,
@@ -239,7 +240,7 @@ class AskAiDialog(QDialog):
         self.show_status("Copied. Paste it into your AI assistant.", Colors.GREEN)
 
     def choose_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Choose save folder", self.folder_input.text())
+        folder = get_existing_directory(self, "Choose save folder", self.folder_input.text())
         if folder:
             self.folder_input.setText(folder)
             self.settings.setValue("folder", folder)
@@ -263,8 +264,8 @@ class AskAiDialog(QDialog):
 
     def save_as(self):
         start = os.path.join(self.folder_input.text().strip() or default_folder(), ai_handoff.default_filename())
-        path, _ = QFileDialog.getSaveFileName(self, "Save diagnostics for AI", start,
-                                              "Markdown (*.md);;Text Files (*.txt);;All Files (*)")
+        path = get_save_file_name(self, "Save diagnostics for AI", start,
+                                  "Markdown (*.md);;Text Files (*.txt);;All Files (*)")
         if path:
             self.folder_input.setText(os.path.dirname(path))
             self.write(path)

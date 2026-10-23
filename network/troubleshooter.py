@@ -6,7 +6,7 @@ from .detector import NetworkDetector
 from .ping import PingTester
 from .speed_test import SpeedTester
 
-from utils.paths import command_env
+from utils.paths import command_env, console_encoding
 
 class Troubleshooter:
     def __init__(self):
@@ -154,7 +154,8 @@ class Troubleshooter:
             
             env = command_env()
             process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                       universal_newlines=True, env=env)
+                                       universal_newlines=True, encoding=console_encoding(), errors="replace",
+                                       env=env)
 
             for line in iter(process.stdout.readline, ''):
                 log_and_callback(line.strip())

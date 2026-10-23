@@ -25,7 +25,7 @@ import time
 import psutil
 
 from network.detector import NetworkDetector
-from utils.paths import command_env
+from utils.paths import command_env, console_encoding
 
 PLATFORM = platform.system().lower()
 VPN_NAME_RE = re.compile(r"^(tun|tap|wg|ppp|utun|ipsec|vpn|nordlynx|proton|mullvad|tailscale|zt|cscotun|gpd|"
@@ -38,7 +38,7 @@ VPN_DESC_RE = re.compile(r"(tap-windows|wintun|wireguard|openvpn|vpn|fortinet|ci
 def _run(command, timeout=8):
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, env=command_env(),
-                                encoding="cp850" if PLATFORM == "windows" else None)
+                                encoding=console_encoding(), errors="replace")
         return result.returncode, result.stdout + result.stderr
     except (OSError, subprocess.SubprocessError) as e:
         return -1, str(e)

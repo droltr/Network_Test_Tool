@@ -4,7 +4,7 @@ import re
 import logging
 import socket
 
-from utils.paths import command_env
+from utils.paths import command_env, console_encoding
 
 class TraceRoute:
     def __init__(self):
@@ -52,6 +52,8 @@ class TraceRoute:
                 stderr=subprocess.STDOUT,
                 text=True,
                 universal_newlines=True,
+                encoding=console_encoding(),
+                errors="replace",
                 startupinfo=startupinfo,
                 env=command_env()
             )

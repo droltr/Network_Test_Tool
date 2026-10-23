@@ -10,11 +10,11 @@ import ipaddress
 import re
 import logging
 
-from utils.paths import command_env, log_file_path
+from utils.paths import command_env, console_encoding, decode_output, log_file_path
 
 # Configure logging to a file in the per-user state directory
 logging.basicConfig(filename=log_file_path('network_detector_debug.log'), level=logging.DEBUG,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+                    format='%(asctime)s - %(levelname)s - %(message)s', encoding='utf-8')
 
 # Try to import netifaces, use fallback if not available
 try:
@@ -83,7 +83,7 @@ class NetworkDetector:
         
         if not gateways and self.platform == "windows":
             try:
-                result = subprocess.run(['ipconfig'], capture_output=True, text=True, encoding='cp850')
+                result = subprocess.run(['ipconfig'], capture_output=True, text=True, encoding=console_encoding(), errors='replace')
                 lines = result.stdout.split('\n')
                 for line in lines:
                     if 'Default Gateway' in line:
@@ -156,7 +156,7 @@ class NetworkDetector:
         dns_servers = []
         try:
             if self.platform == "windows":
-                result = subprocess.run(['ipconfig', '/all'], capture_output=True, text=True, encoding='cp850')
+                result = subprocess.run(['ipconfig', '/all'], capture_output=True, text=True, encoding=console_encoding(), errors='replace')
                 lines = result.stdout.split('\n')
                 for i, line in enumerate(lines):
                     if 'DNS Servers' in line or 'DNS Sunucuları' in line: # Handle Turkish locale
@@ -284,9 +284,13 @@ class NetworkDetector:
             # On Windows, use netsh to get admin state
             if self.platform == "windows":
                 try:
-                    result = subprocess.run(['netsh', 'interface', 'show', 'interface'], capture_output=True, text=True, check=True)
-                    lines = result.stdout.strip().split('\n')
-                    for line in lines[3:]: # Skip header lines
+                    # Raw bytes: netsh writes UTF-8 to a pipe on current Windows, so the default ANSI
+                    # decoding garbled non-ASCII adapter names ("Yerel Ağ Bağlantısı") and they never matched
+                    result = subprocess.run(['netsh', 'interface', 'show', 'interface'], capture_output=True, check=True)
+                    lines = decode_output(result.stdout).strip().splitlines()
+                    # Skip the header and the dashed separator; the old fixed lines[3:] dropped the first adapter
+                    separator = next((i for i, line in enumerate(lines) if line.startswith('---')), 1)
+                    for line in lines[separator + 1:]:
                         parts = line.split()
                         if len(parts) >= 4:
                             status = parts[0]
@@ -326,13 +330,14 @@ class NetworkDetector:
         action = "enable" if state else "disable"
         try:
             command = ['netsh', 'interface', 'set', 'interface', f'name="{adapter_name}"', f'admin={action}']
-            result = subprocess.run(command, capture_output=True, text=True, check=True, shell=True)
+            result = subprocess.run(command, capture_output=True, check=True, shell=True)
             if result.returncode == 0:
                 return True, f"Adapter '{adapter_name}' {action}d successfully."
             else:
-                return False, f"Failed to {action} adapter. Error: {result.stderr}"
+                return False, f"Failed to {action} adapter. Error: {decode_output(result.stderr)}"
         except subprocess.CalledProcessError as e:
-            return False, f"Failed to {action} adapter. Make sure to run as administrator. Error: {e.stderr}"
+            error = (decode_output(e.stderr) or decode_output(e.stdout)).strip()
+            return False, f"Failed to {action} adapter. Make sure to run as administrator. Error: {error}"
         except FileNotFoundError:
             return False, "The 'netsh' command was not found. This script requires it to run."
 
@@ -365,7 +370,7 @@ class NetworkDetector:
                         cmd = ['ping', '-c', '1', gateway]
                     logging.debug(f"Running ping command: {' '.join(cmd)}")
                     result = subprocess.run(cmd, capture_output=True, text=True, timeout=3,
-                                            encoding='cp850' if self.platform == 'windows' else None,
+                                            encoding=console_encoding(), errors='replace',
                                             env=command_env())
                     if result.returncode == 0:
                         logging.debug(f"Local network test to {gateway} successful")
@@ -497,7 +502,7 @@ class NetworkDetector:
             cmd = ['ping', '-c', '1', '-W', str(timeout), host]
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 2,
-                                    encoding='cp850' if self.platform == 'windows' else None,
+                                    encoding=console_encoding(), errors='replace',
                                     env=command_env())
         except (OSError, subprocess.SubprocessError):
             return None

@@ -21,7 +21,7 @@ import psutil
 
 from network.detector import NetworkDetector
 from network.health import dns_query
-from utils.paths import command_env
+from utils.paths import command_env, console_encoding
 
 EXTERNAL_HOSTS = ("1.1.1.1", "8.8.8.8")
 
@@ -34,7 +34,7 @@ def ping_once(host, timeout=1):
         cmd = ["ping", "-c", "1", "-W", str(max(1, int(timeout))), host]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 2, env=command_env(),
-                                encoding="cp850" if os.name == "nt" else None)
+                                encoding=console_encoding(), errors="replace")
     except (OSError, subprocess.SubprocessError):
         return None
     if result.returncode != 0:

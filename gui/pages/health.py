@@ -5,10 +5,11 @@ from datetime import datetime
 from PyQt5.QtCore import Qt, QThread, QSettings, QStandardPaths, QRectF, QUrl, pyqtSignal
 from PyQt5.QtGui import QColor, QPainter, QDesktopServices
 from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget, QButtonGroup, QComboBox,
-                             QScrollArea, QFrame, QTableWidgetItem, QFileDialog, QSizePolicy, QMessageBox,
+                             QScrollArea, QFrame, QTableWidgetItem, QSizePolicy, QMessageBox,
                              QDialog, QPlainTextEdit, QApplication)
 from PyQt5.QtCore import QTimer
 
+from gui.file_dialogs import get_existing_directory
 from gui.pages.base import Page
 from gui.recent import recent_store
 from gui.styles.modern_theme import Colors, mono_font, ui_font
@@ -434,7 +435,7 @@ class HealthPage(Page):
         return page
 
     def choose_log_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Choose log folder", self.log_folder.text())
+        folder = get_existing_directory(self, "Choose log folder", self.log_folder.text())
         if folder:
             self.log_folder.setText(folder)
             self.settings.setValue("log_folder", folder)

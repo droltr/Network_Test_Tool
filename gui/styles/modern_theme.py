@@ -578,4 +578,65 @@ class ModernTheme:
             min-width: 72px;
             min-height: 28px;
         }}
+
+        /* Qt's own file dialog (used where no native dialog exists). Its sidebar is a
+           QListView named "sidebar", which QFrame#sidebar above would paint as the app shell */
+        QFileDialog {{
+            background-color: {c.BG};
+        }}
+        QFileDialog QLabel {{
+            color: {c.TEXT_STRONG};
+        }}
+        QFileDialog QListView, QFileDialog QTreeView, QFileDialog QListView#sidebar {{
+            background-color: {c.SURFACE};
+            alternate-background-color: {c.SURFACE};
+            color: {c.TEXT_STRONG};
+            border: {b}px solid {c.BORDER};
+            border-radius: {g.RADIUS_CONTROL}px;
+            selection-background-color: {rgba(c.BLUE, 0.22)};
+            selection-color: {c.TEXT_STRONG};
+            outline: none;
+        }}
+        QFileDialog QListView::item, QFileDialog QTreeView::item {{
+            color: {c.TEXT_STRONG};
+            padding: 2px 0;
+        }}
+        QFileDialog QListView::item:hover, QFileDialog QTreeView::item:hover {{
+            background-color: {c.SURFACE_2};
+        }}
+        QFileDialog QListView::item:selected, QFileDialog QTreeView::item:selected {{
+            background-color: {rgba(c.BLUE, 0.22)};
+            color: {c.TEXT_STRONG};
+        }}
+        QFileDialog QHeaderView, QFileDialog QHeaderView::section {{
+            background-color: {c.SURFACE_2};
+            color: {c.TEXT_MUTED};
+        }}
+        QFileDialog QHeaderView::section {{
+            padding-left: 8px;
+            height: 26px;
+        }}
+        QFileDialog QLineEdit, QFileDialog QComboBox {{
+            background-color: {c.BG_SUNKEN};
+            color: {c.TEXT_STRONG};
+            min-height: 26px;
+            selection-background-color: {rgba(c.BLUE, 0.35)};
+            selection-color: {c.TEXT_STRONG};
+        }}
+        QFileDialog QSplitter::handle {{
+            background-color: {c.BG};
+        }}
+        QFileDialog QToolButton {{
+            background: transparent;
+            border: none;
+            border-radius: {g.RADIUS_CONTROL}px;
+            padding: 3px;
+        }}
+        QFileDialog QToolButton:hover, QFileDialog QToolButton:checked {{
+            background-color: {c.SURFACE_2};
+        }}
+        QFileDialog QPushButton {{
+            min-width: 72px;
+            min-height: 28px;
+        }}
         """

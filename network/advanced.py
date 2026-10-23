@@ -6,7 +6,7 @@ import logging
 import psutil
 import socket
 
-from utils.paths import command_env
+from utils.paths import command_env, console_encoding
 
 
 
@@ -20,7 +20,7 @@ class AdvancedDiagnostics:
         try:
             if self.platform == "windows":
                 # Run arp -a
-                result = subprocess.run(['arp', '-a'], capture_output=True, text=True, encoding='cp850')
+                result = subprocess.run(['arp', '-a'], capture_output=True, text=True, encoding=console_encoding(), errors='replace')
                 lines = result.stdout.split('\n')
 
                 current_interface = None
@@ -159,7 +159,7 @@ class AdvancedDiagnostics:
         """
         if self.platform == "windows":
             command = ['nbtstat', '-A', ip_address]
-            encoding = 'cp850'
+            encoding = console_encoding()
         else:
             if not shutil.which('nmblookup'):
                 return {'ok': False, 'output': '',
@@ -168,7 +168,7 @@ class AdvancedDiagnostics:
             encoding = None
 
         try:
-            result = subprocess.run(command, capture_output=True, text=True, encoding=encoding,
+            result = subprocess.run(command, capture_output=True, text=True, encoding=encoding, errors='replace',
                                     env=command_env(), timeout=15)
         except subprocess.TimeoutExpired:
             return {'ok': False, 'output': '', 'error': f"No response from {ip_address}"}

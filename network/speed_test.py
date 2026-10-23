@@ -7,7 +7,7 @@ from typing import Optional, Callable, Dict
 
 import psutil
 
-from utils.paths import command_env
+from utils.paths import command_env, console_encoding
 
 try:
     # Bundled, unmodified copy of speedtest-cli by Matt Martz (Apache 2.0),
@@ -306,7 +306,8 @@ class SpeedTester:
             else:
                 cmd = ['ping', '-c', str(count), host]
             
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=command_env())
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=command_env(),
+                                    encoding=console_encoding(), errors='replace')
             
             if result.returncode == 0:
                 output = result.stdout

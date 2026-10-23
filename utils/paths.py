@@ -30,3 +30,32 @@ def command_env():
     if sys.platform.startswith('win'):
         return None
     return {**os.environ, 'LC_ALL': 'C'}
+
+
+def console_encoding():
+    """Code page that Windows console tools (ipconfig, arp, ping, tracert, nbtstat) write to a pipe.
+
+    They use the OEM code page (cp857 on Turkish systems, cp850 on Western European ones), not the
+    ANSI code page Python assumes by default. Returns None on other platforms (locale default).
+    """
+    if not sys.platform.startswith('win'):
+        return None
+    try:
+        import ctypes
+        code_page = ctypes.windll.kernel32.GetOEMCP()
+    except (AttributeError, OSError):
+        code_page = 0
+    return 'utf-8' if code_page == 65001 else (f'cp{code_page}' if code_page else 'cp850')
+
+
+def decode_output(data):
+    """Decode raw command output: UTF-8 when valid (newer netsh writes UTF-8 to a pipe),
+    otherwise the console code page. Never raises."""
+    if data is None:
+        return ''
+    if isinstance(data, str):
+        return data
+    try:
+        return data.decode('utf-8')
+    except UnicodeDecodeError:
+        return data.decode(console_encoding() or 'utf-8', errors='replace')

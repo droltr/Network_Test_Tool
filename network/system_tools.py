@@ -4,7 +4,7 @@ import subprocess
 import platform
 import logging
 
-from utils.paths import command_env
+from utils.paths import command_env, decode_output
 
 
 
@@ -20,13 +20,12 @@ class SystemTools:
             result = subprocess.run(
                 command,
                 capture_output=True,
-                text=True,
                 shell=use_shell,
-                encoding='cp850' if self.platform == "windows" else 'utf-8',
                 env=command_env(),
                 timeout=60
             )
-            return result.returncode == 0, result.stdout + result.stderr
+            # Raw bytes: netsh writes UTF-8, ipconfig the OEM code page; decode_output handles both
+            return result.returncode == 0, decode_output(result.stdout) + decode_output(result.stderr)
         except Exception as e:
             logging.error(f"Command execution failed: {e}")
             return False, str(e)

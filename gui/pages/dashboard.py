@@ -7,8 +7,9 @@ from datetime import datetime
 from PyQt5.QtCore import Qt, QThread, QTimer, QUrl, pyqtSignal
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import (QGridLayout, QHBoxLayout, QVBoxLayout, QWidget, QFrame, QComboBox,
-                             QMessageBox, QFileDialog, QApplication)
+                             QMessageBox, QApplication)
 
+from gui.file_dialogs import get_save_file_name
 from gui.pages.base import Page
 from gui.recent import recent_store, KIND_TITLES
 from gui.styles.modern_theme import Colors, ui_font
@@ -492,9 +493,8 @@ class DashboardPage(Page):
 
     def generate_report(self):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        options = QFileDialog.Options() | QFileDialog.DontUseNativeDialog
-        file_path, _ = QFileDialog.getSaveFileName(self, "Save Network Report", f"network_report_{timestamp}.txt",
-                                                   "Text Files (*.txt);;All Files (*)", options=options)
+        file_path = get_save_file_name(self, "Save Network Report", f"network_report_{timestamp}.txt",
+                                       "Text Files (*.txt);;All Files (*)")
         if not file_path:
             return
         self.report_btn.setEnabled(False)
