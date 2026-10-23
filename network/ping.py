@@ -1,11 +1,57 @@
-import subprocess
+import math
 import platform
+import re
+import subprocess
 import time
-import socket
 import statistics
 from datetime import datetime
 
-from utils.paths import command_env, console_encoding
+from utils.paths import run_command
+
+# Ping output is translated on Windows ("time=21ms" is "süre=21ms" on Turkish systems, an unreachable
+# reply reads "Hedef ana bilgisayara ulaşılamıyor"), so replies are recognised by structure instead of
+# words: a label glued to '=' or '<', a number and "ms" ("time<1ms", "süre=21ms", "temps=21 ms",
+# Linux "time=1.23 ms"). The statistics line ("Minimum = 17ms") has a space before '=' and never matches.
+# Error replies (unreachable, TTL expired) carry no time and count as lost.
+_TIME_RE = re.compile(r'\S([=<])\s?(\d+(?:[.,]\d+)?)\s*ms\b', re.IGNORECASE)
+_TTL_RE = re.compile(r'\bttl=(\d+)', re.IGNORECASE)
+# Fallback for locales whose unit is not "ms" (Russian "время=21мс TTL=118"): last value before TTL=
+_TTL_TIME_RE = re.compile(r'\S([=<])\s?(\d+(?:[.,]\d+)?)\D*\bttl=', re.IGNORECASE)
+
+
+def parse_ping_line(line):
+    """(ms, ttl) when the line is an echo reply, else None. "<1ms" counts as 0.5 ms."""
+    match = _TIME_RE.search(line) or _TTL_TIME_RE.search(line)
+    if not match:
+        return None
+    ms = float(match.group(2).replace(',', '.'))
+    if match.group(1) == '<':
+        ms = min(ms, 1.0) / 2
+    ttl = _TTL_RE.search(line)
+    return ms, int(ttl.group(1)) if ttl else None
+
+
+def parse_ping_output(output):
+    """All echo replies in a ping output as a list of (ms, ttl)."""
+    return [reply for reply in map(parse_ping_line, output.splitlines()) if reply]
+
+
+def ping_command(host, timeout=1.0, count=1, extra=()):
+    """Platform ping command; timeout is the wait per reply in seconds."""
+    if platform.system().lower() == "windows":
+        return ["ping", "-n", str(count), "-w", str(int(timeout * 1000)), *extra, host]
+    return ["ping", "-c", str(count), "-W", str(max(1, math.ceil(timeout))), *extra, host]
+
+
+def ping_reply(host, timeout=1.0):
+    """Ping once: (ms, ttl) of the reply, or None when nothing answered (timeout, unreachable, error)."""
+    try:
+        result = run_command(ping_command(host, timeout), timeout=timeout + 2)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    replies = parse_ping_output(result.stdout)
+    return replies[0] if replies else None
+
 
 class PingTester:
     def __init__(self):
@@ -106,40 +152,6 @@ class PingTester:
             self.is_running = False
     
     def _single_ping(self, host, timeout):
-        """Perform a single ping and return response time and TTL."""
-        try:
-            if self.platform == "windows":
-                cmd = ["ping", "-n", "1", "-w", str(timeout * 1000), host]
-            else:
-                cmd = ["ping", "-c", "1", "-W", str(timeout), host]
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 1, env=command_env(),
-                                    encoding=console_encoding(), errors="replace")
-            
-            if result.returncode == 0:
-                output = result.stdout.lower()
-                response_time = None
-                ttl = None
-
-                # Parse time and TTL
-                if self.platform == "windows":
-                    if "time=" in output and "ttl=" in output:
-                        time_str = output.split("time=")[1].split("ms")[0].strip()
-                        ttl_str = output.split("ttl=")[1].split()[0].strip()
-                        response_time = float(time_str)
-                        ttl = int(ttl_str)
-                else: # Linux/macOS
-                    if "time=" in output and "ttl=" in output:
-                        time_str = output.split("time=")[1].split("ms")[0].strip()
-                        ttl_str = output.split("ttl=")[1].split()[0].strip()
-                        response_time = float(time_str)
-                        ttl = int(ttl_str)
-                
-                return {"time": response_time, "ttl": ttl}
-            else:
-                return None
-                
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, ValueError):
-            return None
-        except Exception:
-            return None
+        """Perform a single ping and return response time and TTL, or None without a reply."""
+        reply = ping_reply(host, timeout)
+        return {"time": reply[0], "ttl": reply[1]} if reply else None

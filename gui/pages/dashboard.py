@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (QGridLayout, QHBoxLayout, QVBoxLayout, QWidget, QFr
                              QMessageBox, QApplication)
 
 from gui.file_dialogs import get_save_file_name
-from gui.pages.base import Page
+from gui.pages.base import Page, finish_thread
 from gui.recent import recent_store, KIND_TITLES
 from gui.styles.modern_theme import Colors, ui_font
 from gui.widgets.charts import ConnectionPath, Sparkline
@@ -227,10 +227,9 @@ class DashboardPage(Page):
         self.timer.stop()
         self.ago_timer.stop()
         self.pinger.stop()
-        self.pinger.wait(3000)
-        for thread in (self.info_thread, self.task_thread):
-            if thread and thread.isRunning():
-                thread.wait(10000)
+        finish_thread(self.pinger, 3000)
+        finish_thread(self.info_thread, 3000)   # read-only lookups, safe to abandon
+        finish_thread(self.task_thread, 10000)  # may be writing a report
 
     # ------------------------------------------------------------ refresh
     def refresh_info(self):
@@ -311,6 +310,7 @@ class DashboardPage(Page):
             layout.addWidget(StatusDot(Colors.RED if critical else Colors.YELLOW, 7))
             name = Label(title, 12.5, 500, Colors.TEXT_STRONG)
             name.setFixedWidth(240)
+            name.setWordWrap(True)  # long adapter names wrap instead of being cut mid-word
             layout.addWidget(name)
             text = Label(description, 12.5, color=Colors.TEXT)
             text.setWordWrap(True)

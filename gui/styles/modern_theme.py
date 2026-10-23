@@ -21,10 +21,10 @@ DEFAULT_THEME = "bauhaus-light"
 _PALETTES = {
     "onedark": dict(
         CHROME="#1b1e24", BG_SUNKEN="#21252b", BG="#282c34", SURFACE="#2c313a", SURFACE_2="#323842",
-        BORDER="#3a404b", ROW_DIVIDER="#2c313a",
-        TEXT="#abb2bf", TEXT_STRONG="#dcdfe4", TEXT_MUTED="#8b929e", TEXT_FAINT="#5c6370",
+        BORDER="#4b5263", ROW_DIVIDER="#2c313a",
+        TEXT="#abb2bf", TEXT_STRONG="#dcdfe4", TEXT_MUTED="#9aa1ad", TEXT_FAINT="#5c6370",
         BLUE="#61afef", BLUE_HOVER="#528bcc", BLUE_PRESSED="#4078b3",
-        GREEN="#98c379", YELLOW="#e5c07b", RED="#e06c75", PURPLE="#c678dd",
+        GREEN="#98c379", YELLOW="#e5c07b", YELLOW_FILL="#e5c07b", RED="#e57b84", PURPLE="#c678dd",
         PRIMARY="#61afef", PRIMARY_HOVER="#528bcc", PRIMARY_PRESSED="#4078b3", ON_PRIMARY="#1b1e24",
         SERIES_DOWN="#61afef", SERIES_UP="#98c379",
         SIDEBAR_BG="#21252b", SIDEBAR_TEXT="#c8ccd4", SIDEBAR_MUTED="#8b929e", SIDEBAR_RULE="#3a404b",
@@ -37,7 +37,8 @@ _PALETTES = {
         BORDER="#141414", ROW_DIVIDER="#D9D0BE",
         TEXT="#1E1C19", TEXT_STRONG="#141414", TEXT_MUTED="#4A463F", TEXT_FAINT="#6E685D",
         BLUE="#1D4E9E", BLUE_HOVER="#173F80", BLUE_PRESSED="#123266",
-        GREEN="#1D4E9E", YELLOW="#B07F00", RED="#C8322A", PURPLE="#141414",
+        # YELLOW is dark enough for text on the cream background; shapes and bars use the brighter YELLOW_FILL
+        GREEN="#1D4E9E", YELLOW="#855F00", YELLOW_FILL="#E5A800", RED="#C8322A", PURPLE="#141414",
         PRIMARY="#141414", PRIMARY_HOVER="#2E2E2E", PRIMARY_PRESSED="#000000", ON_PRIMARY="#F1ECE2",
         SERIES_DOWN="#1D4E9E", SERIES_UP="#C8322A",
         SIDEBAR_BG="#141414", SIDEBAR_TEXT="#F1ECE2", SIDEBAR_MUTED="#B9B2A5", SIDEBAR_RULE="#3A3A3A",
@@ -50,7 +51,7 @@ _PALETTES = {
         BORDER="#5A564E", ROW_DIVIDER="#2E2E2E",
         TEXT="#E4DCCB", TEXT_STRONG="#F1ECE2", TEXT_MUTED="#B9B2A5", TEXT_FAINT="#8F887B",
         BLUE="#6F9BE8", BLUE_HOVER="#8AB0F0", BLUE_PRESSED="#5A86D4",
-        GREEN="#6F9BE8", YELLOW="#F2B705", RED="#F0584D", PURPLE="#F1ECE2",
+        GREEN="#6F9BE8", YELLOW="#F2B705", YELLOW_FILL="#F2B705", RED="#F0584D", PURPLE="#F1ECE2",
         PRIMARY="#F1ECE2", PRIMARY_HOVER="#FFFFFF", PRIMARY_PRESSED="#D9D0BE", ON_PRIMARY="#141414",
         SERIES_DOWN="#6F9BE8", SERIES_UP="#F2B705",
         SIDEBAR_BG="#0B0B0B", SIDEBAR_TEXT="#F1ECE2", SIDEBAR_MUTED="#B9B2A5", SIDEBAR_RULE="#2E2E2E",
@@ -99,6 +100,16 @@ def rgba(hex_color, alpha):
     """CSS rgba() string for a token at the given opacity (0..1)."""
     c = QColor(hex_color)
     return f"rgba({c.red()}, {c.green()}, {c.blue()}, {alpha})"
+
+
+def same_color(a, b):
+    """True if two colour strings name the same colour ("#855F00" == "#855f00")."""
+    return QColor(a).name() == QColor(b).name()
+
+
+def fill_color(color):
+    """The colour to paint a shape or bar with: a status token's fill variant (only yellow has one)."""
+    return Colors.YELLOW_FILL if same_color(color, Colors.YELLOW) else color
 
 
 def qcolor(hex_color, alpha=1.0):
@@ -412,9 +423,13 @@ class ModernTheme:
             border-bottom: 2px solid {c.BLUE};
         }}
         QPushButton:disabled, QPushButton[variant="primary"]:disabled {{
-            background-color: {c.BORDER};
-            color: {c.TEXT_FAINT};
+            background-color: {c.SURFACE_2};
+            color: {c.TEXT_MUTED};
             border: none;
+        }}
+        QPushButton[variant="link"]:disabled, QPushButton[variant="tab"]:disabled {{
+            background: transparent;
+            color: {c.TEXT_FAINT};
         }}
 
         /* Inputs */
@@ -459,7 +474,8 @@ class ModernTheme:
             background-color: {c.SURFACE};
             color: {c.TEXT_STRONG};
             border: {b}px solid {c.BORDER};
-            selection-background-color: {c.SURFACE_2};
+            selection-background-color: {c.SURFACE_2 if Theme.NAME == "bauhaus-light" else rgba(c.BLUE, 0.25)};
+            selection-color: {c.TEXT_STRONG};
             outline: none;
             padding: 4px;
         }}

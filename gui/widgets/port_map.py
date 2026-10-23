@@ -139,7 +139,7 @@ class PortMap(QWidget):
                 p.setBrush(QColor(Colors.SURFACE))
                 p.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), 7, 7)
                 caption = "error" if state == 'Error' else "closed"
-                caption_color = Colors.RED if state == 'Error' else Colors.TEXT_FAINT
+                caption_color = Colors.RED if state == 'Error' else Colors.TEXT_MUTED
                 number_color = Colors.TEXT_MUTED
             else:
                 pen = QPen(QColor(Colors.BORDER), 1)
@@ -147,7 +147,7 @@ class PortMap(QWidget):
                 p.setPen(pen)
                 p.setBrush(Qt.NoBrush)
                 p.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), 7, 7)
-                caption, caption_color, number_color = "pending", Colors.TEXT_FAINT, Colors.TEXT_FAINT
+                caption, caption_color, number_color = "pending", Colors.TEXT_MUTED, Colors.TEXT_FAINT
 
             p.setFont(mono_font(15, 500))
             p.setPen(QColor(number_color))

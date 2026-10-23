@@ -1,6 +1,7 @@
 """Page shell: a 48px header (title, subtitle, actions) above the page body."""
 import html
 
+from PyQt5 import sip
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import QWidget, QFrame, QHBoxLayout, QVBoxLayout, QScrollArea
 
@@ -8,6 +9,26 @@ from gui.file_dialogs import get_save_file_name
 from gui.styles import modern_theme
 from gui.styles.modern_theme import Colors, mono_font, ui_font
 from gui.widgets.common import Label
+
+
+# Threads that did not finish in time; referenced here so they are never destroyed while running
+_detached_threads = []
+
+
+def finish_thread(thread, timeout_ms):
+    """Wait at most timeout_ms for a QThread to finish; never blocks the GUI thread longer.
+
+    A thread that is still running (e.g. stuck in a DNS lookup that cannot be interrupted) is detached:
+    unparented, owned by C++ and kept referenced at module level, so neither its parent nor Python
+    destroys the QThread object while it runs ("QThread: Destroyed while thread is still running" aborts
+    the app). It finishes on its own, or the process exits without waiting for it.
+    Returns True if the thread has finished."""
+    if thread is None or not thread.isRunning() or thread.wait(timeout_ms):
+        return True
+    thread.setParent(None)
+    sip.transferto(thread, None)
+    _detached_threads.append(thread)
+    return False
 
 
 class PageHeader(QFrame):

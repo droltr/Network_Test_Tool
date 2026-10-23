@@ -143,7 +143,7 @@ class Sparkline(QWidget):
         p.drawLine(QPointF(rect.left(), rect.bottom()), QPointF(rect.right(), rect.bottom()))
         data = [v for v in self.values if v is not None]
         if not data:
-            p.setPen(QColor(Colors.TEXT_FAINT))
+            p.setPen(QColor(Colors.TEXT_MUTED))
             p.setFont(ui_font(12))
             p.drawText(rect, Qt.AlignCenter, "Collecting samples…")
             return

@@ -1,36 +1,83 @@
+import ipaddress
 import subprocess
 import platform
 import re
 import logging
 import socket
+import threading
 
-from utils.paths import command_env, console_encoding
+from utils.paths import NO_WINDOW, command_env, decode_output
+
+
+def _is_ip(token):
+    try:
+        ipaddress.ip_address(token.strip('[]'))
+        return True
+    except ValueError:
+        return False
+
 
 class TraceRoute:
+    """Runs tracert / traceroute. One instance may run several traces one after another.
+
+    stop() cancels the running trace. A stop() that arrives while no trace runs cancels the next
+    run_trace() call instead (a worker thread that is stopped before it got to start the trace);
+    the cancellation is used up by that call, so later traces run normally.
+    """
+
     def __init__(self):
         self.platform = platform.system().lower()
         self.is_running = False
         self.process = None
+        self._lock = threading.Lock()
+        self._cancel = threading.Event()   # cancellation of the current (or next) run
 
     def stop(self):
-        self.is_running = False
-        if self.process:
+        with self._lock:
+            self.is_running = False
+            self._cancel.set()
+            process = self.process
+        if process:
             try:
-                self.process.terminate()
-            except:
+                process.terminate()
+            except OSError:
                 pass
 
-    def run_trace(self, target, callback, max_hops=30):
+    def _start_process(self, command, cancel):
+        """Popen the trace command unless the run was cancelled; None when cancelled. Checked under the
+        lock that stop() takes, so a stop() either sees the new process or prevents it from starting."""
+        with self._lock:
+            if cancel.is_set():
+                return None
+            # Binary pipe decoded per line: decode_output picks UTF-8 or the OEM code page.
+            # CREATE_NO_WINDOW keeps tracert from opening a console in the windowed build.
+            self.process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                creationflags=NO_WINDOW,
+                env=command_env()
+            )
+            return self.process
+
+    def run_trace(self, target, callback, max_hops=30, line_callback=None):
         """
         Run traceroute and call callback with structured data for each hop.
         callback(data): data is a dict with keys: hop, ip, time, ms, status, destination
         (time is a display string such as "1.2 ms" or "*", ms is a float or None).
+        line_callback, if given, receives every raw output line.
         """
-        self.is_running = True
+        with self._lock:
+            cancel = self._cancel
+            if cancel.is_set():
+                # A stop() that arrived before this call (e.g. from another thread) cancels this run only
+                self._cancel = threading.Event()
+                return
+            self.is_running = True
 
         try:
             target_ip = socket.gethostbyname(target)
-        except OSError:
+        except (OSError, UnicodeError, ValueError):
             target_ip = target
 
         if self.platform == "windows":
@@ -40,39 +87,29 @@ class TraceRoute:
             command = ["traceroute", "-n", "-q", "1", "-w", "1", "-m", str(max_hops), target]
 
         try:
-            # On Windows, we need to prevent the console window from appearing
-            startupinfo = None
-            if self.platform == "windows":
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            process = self._start_process(command, cancel)
+            if process is None:
+                return
 
-            self.process = subprocess.Popen(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                universal_newlines=True,
-                encoding=console_encoding(),
-                errors="replace",
-                startupinfo=startupinfo,
-                env=command_env()
-            )
-
-            for line in iter(self.process.stdout.readline, ''):
-                if not self.is_running:
+            for raw in iter(process.stdout.readline, b''):
+                if cancel.is_set():
                     break
 
-                line = line.strip()
+                line = decode_output(raw).strip()
                 if not line:
                     continue
+                if line_callback:
+                    line_callback(line)
 
                 parsed = self._parse_line(line)
                 if parsed:
                     parsed['destination'] = parsed.get('ip') == target_ip
                     callback(parsed)
 
-            self.process.stdout.close()
-            self.process.wait()
+            process.stdout.close()
+            if cancel.is_set() and process.poll() is None:
+                process.terminate()
+            process.wait(timeout=5)
 
         except FileNotFoundError:
             logging.error("Trace route failed: command not found")
@@ -81,63 +118,59 @@ class TraceRoute:
             logging.error(f"Trace route failed: {e}")
             callback({"error": str(e)})
         finally:
-            self.is_running = False
+            with self._lock:
+                self.is_running = False
+                if self._cancel is cancel and cancel.is_set():
+                    self._cancel = threading.Event()   # this run's stop() must not cancel the next run
 
     def _parse_line(self, line):
         """Parse a line of traceroute output."""
         if self.platform == "windows":
             # Example: "  1    <1 ms    <1 ms    <1 ms  192.168.1.1"
             # Example: "  2     *        *        *     Request timed out."
-
-            # Skip header lines
-            if line.startswith("Tracing") or line.startswith("over"):
+            # Example: "  1     *     10.90.0.3  reports: Destination host unreachable."
+            # Parsed by structure: the header, footer and messages are translated
+            # (Turkish "İstek zaman aşımına uğradı."), the numbers, '*' and addresses are not.
+            parts = line.split()
+            if not parts or not parts[0].isdigit():
                 return None
+            hop = int(parts[0])
 
-            try:
-                parts = line.split()
-                if not parts or not parts[0].isdigit():
-                    return None
+            # Up to three probe columns: "*", "<1 ms", "12 ms" (the unit word may be localized)
+            times, i = [], 1
+            while i < len(parts) and len(times) < 3:
+                token = parts[i]
+                match = re.fullmatch(r'(<?)(\d+)(\D*)', token)
+                if token == '*':
+                    times.append(None)
+                elif match and not _is_ip(token):
+                    times.append(0.5 if match.group(1) else float(match.group(2)))
+                    if not match.group(3) and i + 1 < len(parts) and parts[i + 1].isalpha():
+                        i += 1  # separate unit ("ms")
+                else:
+                    break
+                i += 1
 
-                hop = int(parts[0])
-
-                # Check for timeout
-                if "Request timed out" in line:
-                    return {
-                        "hop": hop,
-                        "time": "*",
-                        "ms": None,
-                        "ip": "Request timed out",
-                        "status": "timeout"
-                    }
-
-                # Logic to find IP: it's usually the last element
-                ip = parts[-1]
-
-                # Extract times: look for 'ms' or '<1'
-                # Simple average calculation
-                total_time = 0
-                count = 0
-
-                for part in parts[1:-1]:
-                    if part == "ms": continue
-                    if part == "<1":
-                        total_time += 0.5
-                        count += 1
-                    elif part.isdigit():
-                        total_time += int(part)
-                        count += 1
-
-                avg = total_time / count if count > 0 else None
+            ip = next((p.strip('[]') for p in parts[i:] if _is_ip(p)), None)
+            replies = [t for t in times if t is not None]
+            if not replies:
                 return {
                     "hop": hop,
-                    "time": f"{avg:.1f} ms" if avg is not None else "*",
-                    "ms": avg,
-                    "ip": ip,
-                    "status": "ok"
+                    "time": "*",
+                    "ms": None,
+                    # An address here is a router reporting the destination as unreachable
+                    "ip": f"Unreachable (reported by {ip})" if ip else "Request timed out",
+                    "status": "timeout"
                 }
-            except Exception as e:
-                logging.debug(f"Failed to parse line '{line}': {e}")
-                return None
+
+            avg = sum(replies) / len(replies)
+            return {
+                "hop": hop,
+                "time": f"{avg:.1f} ms",
+                "ms": avg,
+                "ip": ip or "*",
+                "status": "ok"
+            }
         else:
             # Linux/macOS with -n -q 1:
             #   " 1  192.168.1.1  1.123 ms"

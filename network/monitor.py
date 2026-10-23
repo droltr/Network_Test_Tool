@@ -8,39 +8,28 @@ Outage layers (decided in the tick where the outage starts):
 Interface state, IP address and default gateway changes are recorded as events too.
 """
 import csv
+import logging
 import os
-import re
 import socket
-import subprocess
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import datetime
 
 import psutil
 
 from network.detector import NetworkDetector
 from network.health import dns_query
-from utils.paths import command_env, console_encoding
+from network.ping import ping_reply
 
 EXTERNAL_HOSTS = ("1.1.1.1", "8.8.8.8")
+STOP_POLL = 0.1   # how often run() checks stop() while probes are in flight
 
 
 def ping_once(host, timeout=1):
     """Round-trip time in ms, or None."""
-    if os.name == "nt":
-        cmd = ["ping", "-n", "1", "-w", str(int(timeout * 1000)), host]
-    else:
-        cmd = ["ping", "-c", "1", "-W", str(max(1, int(timeout))), host]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 2, env=command_env(),
-                                encoding=console_encoding(), errors="replace")
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if result.returncode != 0:
-        return None
-    match = re.search(r"time[=<]\s*([\d.]+)\s*ms", result.stdout, re.IGNORECASE)
-    return float(match.group(1)) if match else 0.0
+    reply = ping_reply(host, timeout)
+    return reply[0] if reply else None
 
 
 class ConnectionMonitor:
@@ -87,6 +76,13 @@ class ConnectionMonitor:
         return targets
 
     def _probe(self, name, address):
+        try:
+            return self._probe_target(name, address)
+        except Exception as e:   # one bad target must not stop the monitor
+            logging.debug(f"monitor probe {name} ({address}) failed: {e}")
+            return {"ok": False, "ms": None, "address": address or "none"}
+
+    def _probe_target(self, name, address):
         if not address:
             return {"ok": False, "ms": None, "address": "none"}
         if name == "dns":
@@ -95,6 +91,8 @@ class ConnectionMonitor:
         if name == "internet":
             # Either public resolver answering counts; both down means the internet is unreachable
             for host in EXTERNAL_HOSTS:
+                if self._stop.is_set():
+                    break
                 ms = ping_once(host)
                 if ms is not None:
                     return {"ok": True, "ms": ms, "address": host}
@@ -225,6 +223,12 @@ class ConnectionMonitor:
                                          f"{new_targets.get('gateway')}")
                     targets, last_targets_refresh = new_targets, tick
                 futures = {name: pool.submit(self._probe, name, address) for name, address in targets.items()}
+                # Wait in short steps: stop() must not wait for a ping that runs into its timeout
+                pending = set(futures.values())
+                while pending and not self._stop.is_set():
+                    _done, pending = wait(pending, timeout=STOP_POLL)
+                if self._stop.is_set():
+                    break   # no sample (and no callback) after stop()
                 results = {name: future.result() for name, future in futures.items()}
                 self.samples += 1
                 current = self._snapshot_interfaces()
@@ -241,7 +245,9 @@ class ConnectionMonitor:
                 self.callback("sample", {"time": now, "results": results})
                 self._stop.wait(max(0.0, self.interval - (time.monotonic() - tick)))
         finally:
-            pool.shutdown(wait=False)
+            # Probes still in flight end on their own timeouts (a few seconds) in the background; they
+            # only return values, so nothing reaches the callback or the log files after this point
+            pool.shutdown(wait=False, cancel_futures=True)
             now = datetime.now()
             for outage in self.open_outages.values():
                 outage["end"] = None

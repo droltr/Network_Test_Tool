@@ -5,11 +5,12 @@ or proxy settings behind, causing drops that a DNS flush or DHCP renew temporari
 
 Each check returns {'id', 'title', 'status', 'summary', 'details', 'fix', 'action'} where
 status is 'ok', 'info', 'warn' or 'fail', and action names a quick action the GUI can offer.
-Linux checks were tested on Fedora (NetworkManager + systemd-resolved).
+Linux checks were tested on Fedora (NetworkManager + systemd-resolved), Windows checks on
+Windows 11 with a Turkish locale. Windows data comes from the IP Helper API, the registry and the
+numeric columns of `route print`, never from translated command text.
 
-> **⚠️ UNVERIFIED:** the Windows and macOS branches have not been run on those systems.
-> To verify: run the scan on Windows 10/11 and macOS and compare with `route print`,
-> `netsh winhttp show proxy` and `scutil --dns`.
+> **⚠️ UNVERIFIED:** the macOS branches have not been run on macOS.
+> To verify: run the scan on macOS and compare with `netstat -rn` and `scutil --dns`.
 """
 import json
 import os
@@ -25,20 +26,21 @@ import time
 import psutil
 
 from network.detector import NetworkDetector
-from utils.paths import command_env, console_encoding
+from network.ping import parse_ping_output, ping_command
+from utils import winnet
+from utils.paths import run_command
 
 PLATFORM = platform.system().lower()
 VPN_NAME_RE = re.compile(r"^(tun|tap|wg|ppp|utun|ipsec|vpn|nordlynx|proton|mullvad|tailscale|zt|cscotun|gpd|"
                          r"wintun|openvpn|wireguard|forticlient|globalprotect|anyconnect|expressvpn|surfshark)",
                          re.IGNORECASE)
-VPN_DESC_RE = re.compile(r"(tap-windows|wintun|wireguard|openvpn|vpn|fortinet|cisco anyconnect|"
+VPN_DESC_RE = re.compile(r"(tap-windows|tap adapter|sophos|wintun|wireguard|openvpn|vpn|fortinet|cisco anyconnect|"
                          r"juniper|pulse secure|globalprotect|nordlynx|tailscale|zerotier)", re.IGNORECASE)
 
 
 def _run(command, timeout=8):
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, env=command_env(),
-                                encoding=console_encoding(), errors="replace")
+        result = run_command(command, timeout=timeout)
         return result.returncode, result.stdout + result.stderr
     except (OSError, subprocess.SubprocessError) as e:
         return -1, str(e)
@@ -61,19 +63,21 @@ def dns_query(server, timeout=2.0):
     name = f"ntt{random.randint(0, 10**9)}.example.com"
     question = b"".join(bytes([len(part)]) + part.encode() for part in name.split(".")) + b"\0"
     packet = struct.pack("!HHHHHH", query_id, 0x0100, 1, 0, 0, 0) + question + struct.pack("!HH", 1, 1)
-    family = socket.AF_INET6 if ":" in server else socket.AF_INET
-    with socket.socket(family, socket.SOCK_DGRAM) as sock:
-        sock.settimeout(timeout)
-        start = time.perf_counter()
-        try:
-            sock.sendto(packet, (server, 53))
+    try:
+        # getaddrinfo gives the right sockaddr for both families (IPv6 needs a 4-tuple)
+        family, _type, _proto, _name, sockaddr = socket.getaddrinfo(server, 53, type=socket.SOCK_DGRAM,
+                                                                    flags=socket.AI_NUMERICHOST)[0]
+        with socket.socket(family, socket.SOCK_DGRAM) as sock:
+            sock.settimeout(timeout)
+            start = time.perf_counter()
+            sock.sendto(packet, sockaddr)
             while True:
                 data, _addr = sock.recvfrom(512)
                 if len(data) >= 4 and struct.unpack("!H", data[:2])[0] == query_id:
                     rcode = struct.unpack("!H", data[2:4])[0] & 0x0F
                     return True, (time.perf_counter() - start) * 1000, rcode
-        except OSError:
-            return False, None, None
+    except (OSError, ValueError, UnicodeError):   # unreachable, timeout or a malformed address
+        return False, None, None
 
 
 # ------------------------------------------------------------------ data sources
@@ -95,6 +99,24 @@ def _windows_routes():
         if len(parts) == 5 and re.match(r"^\d+\.\d+\.\d+\.\d+$", parts[0]) and re.match(r"^\d+\.", parts[1]):
             routes.append({"dst": parts[0], "mask": parts[1], "gateway": parts[2], "interface": parts[3],
                            "metric": parts[4]})
+    return routes
+
+
+def _windows_ipv6_default_routes():
+    """Active ::/0 routes from `route print -6` as "via <gateway> if <index> metric <n>" strings.
+
+    Parsed by structure, not by the translated headings: active routes are the table between the
+    third and fourth "=====" separator lines, rows are "If Metric Destination Gateway".
+    """
+    code, out = _run(["route", "print", "-6"])
+    routes, separators = [], 0
+    for line in out.splitlines():
+        if line.startswith("====="):
+            separators += 1
+            continue
+        parts = line.split()
+        if separators == 3 and len(parts) == 4 and parts[0].isdigit() and parts[1].isdigit() and parts[2] == "::/0":
+            routes.append(f"::/0 via {parts[3]} if {parts[0]} metric {parts[1]}")
     return routes
 
 
@@ -202,20 +224,18 @@ def check_virtual_adapters():
     found = []
     descriptions = {}
     if PLATFORM == "windows":
-        code, out = _run(["powershell", "-NoProfile", "-Command",
-                          "Get-NetAdapter -IncludeHidden | Select-Object Name,InterfaceDescription,Status | "
-                          "ConvertTo-Json"], timeout=15)
+        # IP Helper API: same adapter names as psutil, no PowerShell start-up or console encoding issues
         try:
-            data = json.loads(out) if code == 0 else []
-            for item in data if isinstance(data, list) else [data]:
-                descriptions[item.get("Name", "")] = item.get("InterfaceDescription", "")
-        except ValueError:
+            descriptions = {a["name"]: a["description"] for a in winnet.adapter_addresses() or []}
+        except (OSError, ValueError):
             pass
     for name in stats:
         description = descriptions.get(name, "")
         if VPN_NAME_RE.match(name) or VPN_DESC_RE.search(description):
             up = stats[name].isup
-            has_ip = any(a.family == socket.AF_INET for a in addrs.get(name, []))
+            # APIPA (169.254.x.x) is what Windows gives every disconnected adapter; it is not a real address
+            has_ip = any(a.family == socket.AF_INET and not a.address.startswith("169.254.")
+                         for a in addrs.get(name, []))
             found.append((name, description, up, has_ip))
     if PLATFORM == "linux" and shutil.which("nmcli"):
         code, out = _run(["nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show"])
@@ -238,6 +258,33 @@ def check_virtual_adapters():
                   "Manager → Network adapters → uninstall the TAP/Wintun/WireGuard adapter).")
 
 
+def _reg_value(root, path, name):
+    import winreg
+    try:
+        with winreg.OpenKey(getattr(winreg, root), path) as key:
+            return winreg.QueryValueEx(key, name)[0]
+    except OSError:
+        return None
+
+
+def _windows_proxy_settings():
+    """WinINET and WinHTTP proxy settings read from the registry (the netsh / reg text is translated)."""
+    details = []
+    inet = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+    if _reg_value("HKEY_CURRENT_USER", inet, "ProxyEnable") == 1:
+        server = _reg_value("HKEY_CURRENT_USER", inet, "ProxyServer")
+        details.append("Windows (WinINET) proxy is enabled for this user" + (f": {server}" if server else ""))
+    # What `netsh winhttp show proxy` reports: DWORD version, counter, flags, then the length-prefixed
+    # proxy server string. Flag 0x2 (PROXY_TYPE_PROXY) means a proxy is set; a missing value is direct.
+    blob = _reg_value("HKEY_LOCAL_MACHINE", inet + r"\Connections", "WinHttpSettings")
+    if isinstance(blob, bytes) and len(blob) >= 16:
+        flags, length = struct.unpack_from("<II", blob, 8)
+        if flags & 0x2:
+            server = blob[16:16 + length].decode("ascii", errors="replace")
+            details.append(f"WinHTTP proxy: {server or 'set'}")
+    return details
+
+
 def check_proxy():
     details = []
     for var in ("http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
@@ -257,13 +304,7 @@ def check_proxy():
             if code == 0 and out.strip().strip("'") not in ("none", ""):
                 details.append(f"GNOME proxy mode: {out.strip()}")
     elif PLATFORM == "windows":
-        code, out = _run(["reg", "query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings",
-                          "/v", "ProxyEnable"])
-        if re.search(r"ProxyEnable\s+REG_DWORD\s+0x1", out):
-            details.append("Windows (WinINET) proxy is enabled for this user")
-        code, out = _run(["netsh", "winhttp", "show", "proxy"])
-        if code == 0 and "Direct access" not in out:
-            details.append("WinHTTP proxy: " + " ".join(out.split())[:160])
+        details += _windows_proxy_settings()
     if details:
         return _check("proxy", "Proxy settings", "warn", "A proxy is configured. If it is unreachable, web traffic "
                       "fails while ping still works.", details,
@@ -274,15 +315,21 @@ def check_proxy():
 def check_mtu(target="8.8.8.8"):
     """Detect MTU black holes: large DF packets dropped silently instead of being reported."""
     def probe(payload):
+        """(reply received, "fragmentation needed" reported)."""
         if PLATFORM == "windows":
-            cmd = ["ping", "-n", "1", "-w", "1500", "-f", "-l", str(payload), target]
+            # IcmpSendEcho returns a status code; ping.exe only prints a translated sentence for it
+            echo = winnet.icmp_echo(target, timeout_ms=1500, size=payload, dont_fragment=True)
+            if echo is not None:
+                return echo[0] == winnet.IP_SUCCESS, echo[0] == winnet.IP_PACKET_TOO_BIG
+            cmd = ping_command(target, 1.5, extra=("-f", "-l", str(payload)))
         elif PLATFORM == "darwin":
             cmd = ["ping", "-c", "1", "-t", "2", "-D", "-s", str(payload), target]
         else:
             cmd = ["ping", "-c", "1", "-W", "2", "-M", "do", "-s", str(payload), target]
         code, out = _run(cmd, timeout=5)
+        # English wording is reliable here: POSIX pings run with LC_ALL=C
         too_big = bool(re.search(r"(too long|needs to be fragmented|frag needed|mtu)", out, re.IGNORECASE))
-        return code == 0, too_big
+        return bool(parse_ping_output(out)), too_big
 
     small_ok, _ = probe(56)
     if not small_ok:
@@ -312,19 +359,22 @@ def check_mtu(target="8.8.8.8"):
 
 def check_ipv6():
     """A default IPv6 route without working IPv6 makes many connections wait before falling back."""
-    has_route = False
+    has_route, details = False, []
     if PLATFORM == "linux":
         code, out = _run(["ip", "-j", "-6", "route", "show", "default"])
         has_route = code == 0 and out.strip() not in ("", "[]")
+    elif PLATFORM == "windows":
+        details = _windows_ipv6_default_routes()
+        has_route = bool(details)
     if not has_route:
         return _check("ipv6", "IPv6 connectivity", "ok", "No IPv6 default route; IPv4 is used.")
     try:
         with socket.create_connection(("2001:4860:4860::8888", 53), timeout=3):
             pass
-        return _check("ipv6", "IPv6 connectivity", "ok", "IPv6 works.")
+        return _check("ipv6", "IPv6 connectivity", "ok", "IPv6 works.", details)
     except OSError as e:
         return _check("ipv6", "IPv6 connectivity", "warn",
-                      "An IPv6 route exists but IPv6 does not reach the internet.", [str(e)],
+                      "An IPv6 route exists but IPv6 does not reach the internet.", details + [str(e)],
                       "Connections may stall before falling back to IPv4. Fix IPv6 on the router or disable it on "
                       "this connection.")
 
@@ -352,17 +402,36 @@ def check_resolv_conf():
     return _check("resolvconf", "resolv.conf", "ok", "Managed by the system resolver.", details)
 
 
+def _third_party_winsock_providers(providers):
+    """Display lines for the providers that are not Windows' own: a DLL outside System32/SysWOW64, or a
+    layered service provider (LSP) anywhere, since Windows itself ships none."""
+    found = set()
+    for provider in providers:
+        path = provider.get("path") or "?"
+        if provider.get("layered") or not winnet.is_windows_provider_path(provider.get("path")):
+            kind = "layered provider, " if provider.get("layered") else ""
+            found.add(f"{path} ({kind}{provider.get('name') or 'unnamed'}, {provider.get('catalog')}-bit catalog)")
+    return sorted(found)
+
+
 def check_windows_winsock():
     if PLATFORM != "windows":
         return None
-    code, out = _run(["netsh", "winsock", "show", "catalog"], timeout=15)
-    providers = set(re.findall(r"Provider Path:\s*(.+)", out))
-    third_party = [p for p in providers if "system32" not in p.lower() and "syswow64" not in p.lower()]
+    # WSCEnumProtocols + WSCGetProviderPath: the data behind `netsh winsock show catalog`, whose labels
+    # are translated
+    try:
+        providers = winnet.winsock_providers()
+    except (OSError, ValueError):
+        providers = None
+    if not providers:
+        return _check("winsock", "Winsock catalog", "info", "The Winsock catalog could not be read.")
+    third_party = _third_party_winsock_providers(providers)
     if third_party:
         return _check("winsock", "Winsock catalog", "warn", "Non-Windows network providers are installed in "
-                      "Winsock (often left by VPN or security software).", sorted(third_party),
+                      "Winsock (often left by VPN or security software).", third_party,
                       "Run 'netsh winsock reset' as administrator and restart.")
-    return _check("winsock", "Winsock catalog", "ok", "Only Windows providers are registered.")
+    return _check("winsock", "Winsock catalog", "ok", f"Only Windows providers are registered "
+                  f"({len(providers)} catalog entries).")
 
 
 CHECKS = [

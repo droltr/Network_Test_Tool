@@ -6,9 +6,12 @@ a TCP control connection with one-byte state messages and length-prefixed JSON, 
 TCP connection per data stream. No iperf3 code is copied. See THIRD_PARTY_NOTICES.md.
 
 Supported: TCP, upload (client sends) and download (-R, server sends), parallel streams,
-fixed duration. Not supported yet: UDP, bidirectional mode, authentication.
+fixed duration; the server also takes byte and block count tests (-n, -k). Not supported yet:
+UDP, bidirectional mode, authentication.
 """
+import errno
 import json
+import math
 import os
 import secrets
 import select
@@ -23,6 +26,10 @@ COOKIE_SIZE = 37
 COOKIE_CHARS = "abcdefghijklmnopqrstuvwxyz234567"
 CLIENT_VERSION = "3.17 (network-test-tool)"
 MAX_PARAMS_JSON = 8 * 1024
+MAX_BLKSIZE = 1024 * 1024      # iperf3's MAX_BLOCKSIZE
+MAX_STREAMS = 128              # iperf3's MAX_STREAMS
+POLL = 0.2                     # control sockets wake up this often to notice stop()
+STOPPED_TEXT = "The test was stopped."
 
 # Control states (iperf_api.h)
 TEST_START = 1
@@ -40,8 +47,14 @@ ACCESS_DENIED = -1
 SERVER_ERROR = -2
 
 # Error numbers sent with SERVER_ERROR (iperf_api.h)
+IEDURATION = 5
+IENUMSTREAMS = 6
+IEBLOCKSIZE = 7
 IEUNIMP = 13
 ERROR_TEXT = {
+    IEDURATION: "invalid test duration",
+    IENUMSTREAMS: f"number of parallel streams must be 1 to {MAX_STREAMS}",
+    IEBLOCKSIZE: f"block size must be 1 to {MAX_BLKSIZE} bytes",
     IEUNIMP: "an option you are trying to set is not implemented yet",
     119: "the client has terminated",
     120: "the server has terminated",
@@ -63,13 +76,31 @@ def stream_ids(count):
     return [1] + list(range(3, count + 2))
 
 
-def recv_exact(sock, size):
+def recv_exact(sock, size, cancel=None, timeout=15):
+    """Read exactly size bytes.
+
+    With cancel (a callable), sock must have a short timeout such as POLL: the read then gives up
+    with IperfError when cancel() turns true, or with socket.timeout after timeout seconds without data.
+    """
     data = bytearray()
+    deadline = time.monotonic() + timeout
     while len(data) < size:
-        chunk = sock.recv(size - len(data))
+        try:
+            chunk = sock.recv(size - len(data))
+        except socket.timeout:
+            if cancel is None:
+                raise
+            if cancel():
+                raise IperfError(STOPPED_TEXT)
+            if time.monotonic() >= deadline:
+                raise
+            continue
         if not chunk:
+            if cancel and cancel():
+                raise IperfError(STOPPED_TEXT)
             raise IperfError("the connection was closed by the other side")
         data += chunk
+        deadline = time.monotonic() + timeout
     return bytes(data)
 
 
@@ -77,8 +108,8 @@ def send_state(sock, state):
     sock.sendall(struct.pack("b", state))
 
 
-def recv_state(sock):
-    return struct.unpack("b", recv_exact(sock, 1))[0]
+def recv_state(sock, cancel=None, timeout=15):
+    return struct.unpack("b", recv_exact(sock, 1, cancel, timeout))[0]
 
 
 def send_json(sock, obj):
@@ -86,25 +117,62 @@ def send_json(sock, obj):
     sock.sendall(struct.pack("!I", len(payload)) + payload)
 
 
-def recv_json(sock, max_size=0):
-    size = struct.unpack("!I", recv_exact(sock, 4))[0]
+def recv_json(sock, max_size=0, cancel=None, timeout=15):
+    size = struct.unpack("!I", recv_exact(sock, 4, cancel, timeout))[0]
     if size == 0 or (max_size and size > max_size):
         raise IperfError(f"unexpected JSON message size {size}")
-    return json.loads(recv_exact(sock, size).decode("utf-8"))
+    return json.loads(recv_exact(sock, size, cancel, timeout).decode("utf-8"))
+
+
+def _shutdown(sock):
+    """Wake up any thread blocked on sock; the owner still closes it."""
+    try:
+        sock.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass
+
+
+def _error_text(code):
+    if os.name == "nt":
+        import ctypes
+        return ctypes.FormatError(code).strip()
+    return os.strerror(code)
 
 
 def mbps(byte_count, seconds):
     return byte_count * 8 / seconds / 1_000_000 if seconds > 0 else 0.0
 
 
-class _Stream:
-    """One TCP data connection with a sender or receiver thread."""
+class _SendBudget:
+    """Bytes the sending streams of a byte or block count test (iperf3 -n / -k) may still send together."""
 
-    def __init__(self, sock, stream_id, sending, blksize):
+    def __init__(self, total):
+        self.remaining = total
+        self._lock = threading.Lock()
+
+    def take(self, size):
+        with self._lock:
+            size = min(size, self.remaining)
+            self.remaining -= size
+            return size
+
+    def give_back(self, size):
+        with self._lock:
+            self.remaining += size
+
+
+class _Stream:
+    """One TCP data connection with a sender or receiver thread.
+
+    A sending stream with a budget (_SendBudget) stops once the budget is used up.
+    """
+
+    def __init__(self, sock, stream_id, sending, blksize, budget=None):
         self.sock = sock
         self.id = stream_id
         self.sending = sending
         self.blksize = blksize
+        self.budget = budget
         self.bytes = 0
         self.stop = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -122,10 +190,20 @@ class _Stream:
             if self.sending:
                 buffer = memoryview(os.urandom(self.blksize))
                 while not self.stop.is_set():
+                    size = self.budget.take(self.blksize) if self.budget else self.blksize
+                    if size == 0:
+                        break   # byte / block count reached; the client ends the test with TEST_END
                     try:
-                        self.bytes += self.sock.send(buffer)
+                        sent = self.sock.send(buffer[:size])
                     except socket.timeout:
-                        continue
+                        sent = 0
+                    except OSError:
+                        if self.budget:
+                            self.budget.give_back(size)
+                        raise
+                    self.bytes += sent
+                    if self.budget and sent < size:
+                        self.budget.give_back(size - sent)
             else:
                 buffer = bytearray(self.blksize)
                 while not self.stop.is_set():
@@ -209,15 +287,73 @@ class IperfClient:
         self.interval_callback = interval_callback or (lambda data: None)
         self.log = log_callback or (lambda text: None)
         self._stop = threading.Event()
+        self._forced = False
+        self._graceful = False      # True while the test runs: stop() then still exchanges the results
+        self._lock = threading.Lock()
+        self._sockets = []
         self.ctrl = None
         self.streams = []
 
-    def stop(self):
-        """End the test early; the results so far are still exchanged."""
+    def stop(self, force=False):
+        """End the test early.
+
+        While the test is running the results so far are still exchanged. During setup, or with
+        force=True, the sockets are shut down so run() returns within a fraction of a second.
+        """
+        self._forced = self._forced or force
         self._stop.set()
+        if self._cancelled():
+            with self._lock:
+                sockets = list(self._sockets)
+            for sock in sockets:
+                _shutdown(sock)
+
+    def _cancelled(self):
+        return self._stop.is_set() and (self._forced or not self._graceful)
+
+    def _check_cancel(self):
+        if self._cancelled():
+            raise IperfError(STOPPED_TEXT)
 
     def _connect(self):
-        return socket.create_connection((self.host, self.port), timeout=self.connect_timeout)
+        """Non-blocking connect that notices stop() and gives up after connect_timeout."""
+        deadline = time.monotonic() + self.connect_timeout
+        last_error = None
+        for family, kind, proto, _name, address in socket.getaddrinfo(self.host, self.port, 0, socket.SOCK_STREAM):
+            self._check_cancel()
+            sock = socket.socket(family, kind, proto)
+            with self._lock:
+                self._sockets.append(sock)
+            try:
+                sock.setblocking(False)
+                code = sock.connect_ex(address)
+                if code not in (0, errno.EINPROGRESS, errno.EWOULDBLOCK, errno.EALREADY):
+                    raise OSError(code, _error_text(code))
+                while code != 0:
+                    self._check_cancel()
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise socket.timeout("timed out")
+                    _, writable, failed = select.select([], [sock], [sock], min(POLL, remaining))
+                    if writable or failed:
+                        code = sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                        if code:
+                            raise OSError(code, _error_text(code))
+                        break
+                self._check_cancel()
+                sock.settimeout(POLL)
+                return sock
+            except (OSError, IperfError) as e:
+                with self._lock:
+                    self._sockets.remove(sock)
+                sock.close()
+                if isinstance(e, (IperfError, socket.timeout)):
+                    raise
+                last_error = e
+        raise last_error or OSError(f"Could not resolve {self.host}")
+
+    def _recv_state(self):
+        return recv_state(self.ctrl, self._cancelled)
 
     def run(self):
         result = {
@@ -231,11 +367,11 @@ class IperfClient:
             self.ctrl.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             result['remote_address'] = self.ctrl.getpeername()[0]
             self.ctrl.sendall(cookie)
-            self.ctrl.settimeout(15)
             test_started = None
 
             while True:
-                state = recv_state(self.ctrl)
+                self._check_cancel()
+                state = self._recv_state()
                 if state == PARAM_EXCHANGE:
                     params = {"tcp": True, "omit": 0, "time": self.duration, "num": 0, "blockcount": 0,
                               "parallel": self.parallel, "len": self.blksize, "client_version": CLIENT_VERSION}
@@ -244,6 +380,7 @@ class IperfClient:
                     send_json(self.ctrl, params)
                 elif state == CREATE_STREAMS:
                     for stream_id in stream_ids(self.parallel):
+                        self._check_cancel()
                         sock = self._connect()
                         sock.sendall(cookie)
                         self.streams.append(_Stream(sock, stream_id, sending=not self.reverse,
@@ -253,6 +390,7 @@ class IperfClient:
                 elif state == TEST_START:
                     pass
                 elif state == TEST_RUNNING:
+                    self._graceful = True
                     test_started = time.monotonic()
                     for stream in self.streams:
                         stream.start()
@@ -268,7 +406,7 @@ class IperfClient:
                         for stream in self.streams:
                             stream.finish()
                     send_json(self.ctrl, _results_message(self.streams, sender=not self.reverse))
-                    result['server_results'] = recv_json(self.ctrl)
+                    result['server_results'] = recv_json(self.ctrl, cancel=self._cancelled)
                 elif state == DISPLAY_RESULTS:
                     send_state(self.ctrl, IPERF_DONE)
                     break
@@ -277,7 +415,7 @@ class IperfClient:
                 elif state == ACCESS_DENIED:
                     raise IperfError("The server is busy running a test. Try again later or pick another server.")
                 elif state == SERVER_ERROR:
-                    code, errno_value = struct.unpack("!ii", recv_exact(self.ctrl, 8))
+                    code, errno_value = struct.unpack("!ii", recv_exact(self.ctrl, 8, self._cancelled))
                     text = ERROR_TEXT.get(code, f"server error {code}")
                     raise IperfError(f"Server error: {text}" + (f" (errno {errno_value})" if errno_value > 0 else ""))
                 elif state == SERVER_TERMINATE:
@@ -295,11 +433,15 @@ class IperfClient:
         finally:
             for stream in self.streams:
                 stream.finish()
-            if self.ctrl:
+            with self._lock:
+                sockets, self._sockets = self._sockets, []
+            for sock in sockets:
                 try:
-                    self.ctrl.close()
+                    sock.close()
                 except OSError:
                     pass
+        if result['error'] and self._cancelled():
+            result['error'] = STOPPED_TEXT
 
         self._summarize(result)
         return result
@@ -315,11 +457,11 @@ class IperfClient:
             # Watch the control socket for an early server message without consuming the test time
             readable, _, _ = select.select([self.ctrl], [], [], min(0.2, deadline - now))
             if readable:
-                state = recv_state(self.ctrl)
+                state = self._recv_state()
                 if state == SERVER_TERMINATE:
                     raise IperfError("The server terminated the test.")
                 if state == SERVER_ERROR:
-                    code, _errno = struct.unpack("!ii", recv_exact(self.ctrl, 8))
+                    code, _errno = struct.unpack("!ii", recv_exact(self.ctrl, 8, self._cancelled))
                     raise IperfError(f"Server error: {ERROR_TEXT.get(code, code)}")
             now = time.monotonic()
             if now - last_time >= 1.0:
@@ -367,13 +509,35 @@ class IperfServer:
         self.event = event_callback or (lambda kind, data: None)
         self.max_duration = max_duration
         self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self._handshakes = set()    # sockets that may sit in a blocking read; stop() shuts them down
         self.listener = None
 
     def stop(self):
+        """Stop serving. A running test is ended with SERVER_TERMINATE; serve_forever() returns within a
+        fraction of a second, even while a client is half-way through its handshake."""
         self._stop.set()
+        with self._lock:
+            sockets = list(self._handshakes)
+        for sock in sockets:
+            _shutdown(sock)
+
+    def _track(self, sock, active=True):
+        with self._lock:
+            if active:
+                self._handshakes.add(sock)
+            else:
+                self._handshakes.discard(sock)
+        if active and self._stop.is_set():
+            _shutdown(sock)
+
+    def _stopped(self):
+        return self._stop.is_set()
 
     def _listen(self):
         try:
+            if self.bind_address and ":" not in self.bind_address:
+                raise OSError("an IPv4 bind address needs an IPv4 socket")
             sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
             sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)   # accept IPv4 too
         except (OSError, AttributeError):
@@ -400,11 +564,15 @@ class IperfServer:
                     continue
                 except OSError:
                     break
+                self._track(conn)
                 try:
                     self._handle_test(conn, addr)
                 except (IperfError, OSError, ValueError) as e:
-                    self.event('error', f"Test from {addr[0]} failed: {e}")
+                    if self._stop.is_set():
+                        e = "the server was stopped"
+                    self.event('error', f"Test from {addr[0].removeprefix('::ffff:')} failed: {e}")
                 finally:
+                    self._track(conn, False)
                     try:
                         conn.close()
                     except OSError:
@@ -419,38 +587,97 @@ class IperfServer:
                 conn, _addr = self.listener.accept()
             except socket.timeout:
                 continue
-            conn.settimeout(5)
+            except OSError:
+                break
+            conn.settimeout(POLL)
+            self._track(conn)
             try:
-                received = recv_exact(conn, COOKIE_SIZE)
+                received = recv_exact(conn, COOKIE_SIZE, self._stopped, timeout=5)
+                if received == cookie:
+                    return conn
+                send_state(conn, ACCESS_DENIED)   # someone else while we are busy
             except (IperfError, OSError):
-                conn.close()
-                continue
-            if received == cookie:
-                return conn
-            send_state(conn, ACCESS_DENIED)   # someone else while we are busy
+                pass
+            finally:
+                self._track(conn, False)
             conn.close()
         raise IperfError("the client did not open its data streams")
 
+    def _reject(self, ctrl, code, message):
+        send_state(ctrl, SERVER_ERROR)
+        ctrl.sendall(struct.pack("!ii", code, 0))
+        raise IperfError(message)
+
+    def _check_params(self, ctrl, client, params):
+        """Validate the client's test parameters; returns
+        (parallel, reverse, duration, blksize, clamped, byte_limit).
+
+        Invalid values are answered with SERVER_ERROR. A duration above max_duration is clamped: the
+        server then ends the test with SERVER_TERMINATE when max_duration has passed. byte_limit is the
+        total of a byte or block count test (iperf3 -n / -k, sent with time 0), else 0: the client ends
+        such a test with TEST_END, and in reverse mode the server stops sending at the limit.
+        """
+        def number(key, default, integer):
+            value = params.get(key, default)
+            if value is None:
+                return default
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                raise ValueError(key)
+            if integer and value != int(value):
+                raise ValueError(key)
+            return int(value) if integer else float(value)
+
+        if not isinstance(params, dict):
+            self._reject(ctrl, IEUNIMP, f"{client} sent invalid test parameters")
+        if not params.get("tcp") or params.get("udp") or params.get("sctp") or params.get("bidirectional"):
+            kind = "UDP" if params.get("udp") else "bidirectional" if params.get("bidirectional") else "this"
+            self._reject(ctrl, IEUNIMP, f"{client} asked for a {kind} test, which this server does not support yet")
+        try:
+            parallel = number("parallel", 1, True)
+        except ValueError:
+            parallel = 0
+        if not 1 <= parallel <= MAX_STREAMS:
+            self._reject(ctrl, IENUMSTREAMS, f"{client} asked for an invalid number of streams")
+        try:
+            blksize = number("len", DEFAULT_BLKSIZE, True) or DEFAULT_BLKSIZE
+        except ValueError:
+            blksize = -1
+        if not 1 <= blksize <= MAX_BLKSIZE:
+            self._reject(ctrl, IEBLOCKSIZE, f"{client} asked for an invalid block size")
+        try:
+            duration = number("time", 10, False)
+        except ValueError:
+            duration = -1
+        if duration < 0:
+            self._reject(ctrl, IEDURATION, f"{client} asked for an invalid test duration")
+        try:
+            byte_count = number("bytes", 0, True)
+            block_count = number("blockcount", 0, True)
+        except ValueError:
+            byte_count = block_count = -1
+        if byte_count < 0 or block_count < 0:
+            self._reject(ctrl, IEUNIMP, f"{client} asked for an invalid byte or block count")
+        # Both set: whichever is reached first ends the test, as in iperf3
+        byte_limit = min([limit for limit in (byte_count, block_count * blksize) if limit > 0], default=0)
+        # time 0 is a byte / block count test, or an endless one (iperf3 -t 0); neither may run longer
+        # than max_duration
+        if duration == 0 or duration > self.max_duration:
+            return parallel, bool(params.get("reverse")), float(self.max_duration), blksize, True, byte_limit
+        return parallel, bool(params.get("reverse")), duration, blksize, False, byte_limit
+
     def _handle_test(self, ctrl, addr):
         client = addr[0].removeprefix("::ffff:")
-        ctrl.settimeout(10)
+        ctrl.settimeout(POLL)
         ctrl.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        cookie = recv_exact(ctrl, COOKIE_SIZE)
+        cookie = recv_exact(ctrl, COOKIE_SIZE, self._stopped, timeout=10)
         send_state(ctrl, PARAM_EXCHANGE)
-        params = recv_json(ctrl, MAX_PARAMS_JSON)
-
-        if not params.get("tcp") or params.get("udp") or params.get("sctp") or params.get("bidirectional"):
-            send_state(ctrl, SERVER_ERROR)
-            ctrl.sendall(struct.pack("!ii", IEUNIMP, 0))
-            kind = "UDP" if params.get("udp") else "bidirectional" if params.get("bidirectional") else "this"
-            raise IperfError(f"{client} asked for a {kind} test, which this server does not support yet")
-
-        parallel = max(1, min(int(params.get("parallel", 1)), 128))
-        reverse = bool(params.get("reverse"))
-        duration = float(params.get("time", 10) or 0)
-        blksize = int(params.get("len", DEFAULT_BLKSIZE) or DEFAULT_BLKSIZE)
+        params = recv_json(ctrl, MAX_PARAMS_JSON, self._stopped, timeout=10)
+        parallel, reverse, duration, blksize, clamped, byte_limit = self._check_params(ctrl, client, params)
+        if clamped and params.get("time"):
+            self.event('error', f"{client}: test limited to the server maximum of {duration:.0f} s")
         self.event('client', {'address': client, 'parallel': parallel, 'reverse': reverse, 'duration': duration,
-                              'version': params.get("client_version", "")})
+                              'bytes': byte_limit, 'version': str(params.get("client_version", ""))[:80]})
+        budget = _SendBudget(byte_limit) if byte_limit and reverse else None
 
         send_state(ctrl, CREATE_STREAMS)
         deadline = time.monotonic() + 10
@@ -458,7 +685,7 @@ class IperfServer:
         try:
             for stream_id in stream_ids(parallel):
                 conn = self._accept_stream(cookie, deadline)
-                streams.append(_Stream(conn, stream_id, sending=reverse, blksize=blksize))
+                streams.append(_Stream(conn, stream_id, sending=reverse, blksize=blksize, budget=budget))
 
             send_state(ctrl, TEST_START)
             send_state(ctrl, TEST_RUNNING)
@@ -466,15 +693,19 @@ class IperfServer:
             for stream in streams:
                 stream.start()
 
-            limit = started + (duration if duration > 0 else self.max_duration) + 10
+            # A clamped test ends at max_duration; otherwise the client gets some slack to send TEST_END
+            limit = started + duration + (0 if clamped else 10)
             last_time, last_bytes = started, 0
+            self._track(ctrl, False)   # the loop below polls; stop() lets it send SERVER_TERMINATE
             while True:
                 if self._stop.is_set():
                     send_state(ctrl, SERVER_TERMINATE)
-                    raise IperfError("server stopped")
+                    raise IperfError("the server was stopped")
                 if time.monotonic() > limit:
-                    raise IperfError("the client did not end the test in time")
-                readable, _, _ = select.select([ctrl, self.listener], [], [], 0.2)
+                    send_state(ctrl, SERVER_TERMINATE)
+                    raise IperfError(f"the test reached the server's maximum of {duration:.0f} s" if clamped
+                                     else "the client did not end the test in time")
+                readable, _, _ = select.select([ctrl, self.listener], [], [], POLL)
                 if self.listener in readable:
                     try:
                         extra, _ = self.listener.accept()
@@ -490,22 +721,23 @@ class IperfServer:
                                             'reverse': reverse})
                     last_time, last_bytes = now, total
                 if ctrl in readable:
-                    state = recv_state(ctrl)
+                    state = recv_state(ctrl, self._stopped)
                     if state == TEST_END:
                         break
                     if state == CLIENT_TERMINATE:
                         raise IperfError("the client terminated the test")
                     if state in (IPERF_DONE,):
                         raise IperfError("the client ended the session early")
+            self._track(ctrl)
 
             for stream in streams:
                 stream.finish()
             send_state(ctrl, EXCHANGE_RESULTS)
-            client_results = recv_json(ctrl)
+            client_results = recv_json(ctrl, MAX_PARAMS_JSON * 16, self._stopped, timeout=10)
             send_json(ctrl, _results_message(streams, sender=reverse))
             send_state(ctrl, DISPLAY_RESULTS)
             try:
-                recv_state(ctrl)   # IPERF_DONE
+                recv_state(ctrl, self._stopped, timeout=5)   # IPERF_DONE
             except (IperfError, OSError):
                 pass
 

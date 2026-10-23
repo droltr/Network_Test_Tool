@@ -3,7 +3,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget, QButtonGroup, QTableWidgetItem
 
-from gui.pages.base import Page
+from gui.pages.base import Page, finish_thread
 from gui.styles.modern_theme import Colors, mono_font, ui_font
 from gui.widgets.common import (Card, Label, LineInput, LogPane, StatusDot, Badge, button, link_button, hbox,
                                 make_table, cell_widget)
@@ -278,4 +278,4 @@ class AdvancedPage(Page):
 
     def cleanup(self):
         for worker in list(self.workers):
-            worker.wait(5000)
+            finish_thread(worker, 5000)

@@ -10,7 +10,9 @@ import ipaddress
 import re
 import logging
 
-from utils.paths import command_env, console_encoding, decode_output, log_file_path
+from network.ping import ping_reply
+from utils import winnet
+from utils.paths import log_file_path, run_command
 
 # Configure logging to a file in the per-user state directory
 logging.basicConfig(filename=log_file_path('network_detector_debug.log'), level=logging.DEBUG,
@@ -82,19 +84,12 @@ class NetworkDetector:
                 logging.error(f"get_default_gateway - {e}")
         
         if not gateways and self.platform == "windows":
-            try:
-                result = subprocess.run(['ipconfig'], capture_output=True, text=True, encoding=console_encoding(), errors='replace')
-                lines = result.stdout.split('\n')
-                for line in lines:
-                    if 'Default Gateway' in line:
-                        parts = line.split(':')
-                        if len(parts) > 1:
-                            gateway = parts[1].strip()
-                            if gateway and gateway != '0.0.0.0':
-                                gateways.append(gateway)
-                logging.debug(f"get_default_gateway (ipconfig) - {gateways}")
-            except Exception as e:
-                logging.error(f"get_default_gateway (ipconfig) - {e}")
+            # IP Helper API instead of ipconfig, whose "Default Gateway" label is translated
+            for adapter in self._windows_adapters():
+                if adapter['up']:
+                    gateways += [g for g in adapter['gateways']
+                                 if '.' in g and g != '0.0.0.0' and g not in gateways]
+            logging.debug(f"get_default_gateway (GetAdaptersAddresses) - {gateways}")
 
         if not gateways and self.platform == "linux":
             for _iface, gateway in self._linux_default_routes():
@@ -122,6 +117,15 @@ class NetworkDetector:
         except (OSError, ValueError, StopIteration) as e:
             logging.error(f"_linux_default_routes - {e}")
         return [(iface, gateway) for _metric, iface, gateway in sorted(routes)]
+
+    @staticmethod
+    def _windows_adapters():
+        """Adapters from the IP Helper API (lowest metric first), [] if it fails."""
+        try:
+            return winnet.adapter_addresses() or []
+        except (OSError, ValueError) as e:
+            logging.error(f"GetAdaptersAddresses - {e}")
+            return []
 
     def get_primary_interface(self):
         """Return (interface name, IPv4) of the interface that carries the default route."""
@@ -156,16 +160,13 @@ class NetworkDetector:
         dns_servers = []
         try:
             if self.platform == "windows":
-                result = subprocess.run(['ipconfig', '/all'], capture_output=True, text=True, encoding=console_encoding(), errors='replace')
-                lines = result.stdout.split('\n')
-                for i, line in enumerate(lines):
-                    if 'DNS Servers' in line or 'DNS Sunucuları' in line: # Handle Turkish locale
-                        # Look for IP addresses in the current and next few lines
-                        for j in range(i, min(i + 5, len(lines))):
-                            ip_matches = re.findall(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b', lines[j])
-                            for ip in ip_matches:
-                                if ip not in dns_servers:
-                                    dns_servers.append(ip)
+                # Connected adapters only: disconnected ones keep stale servers (often from a VPN)
+                # that ipconfig /all hides but that would show up as dead DNS servers
+                for adapter in self._windows_adapters():
+                    if adapter['up'] and adapter['if_type'] != winnet.IF_TYPE_LOOPBACK:
+                        for ip in adapter['dns']:
+                            if '.' in ip and ip not in dns_servers:
+                                dns_servers.append(ip)
             else: # Linux/macOS
                 # systemd-resolved: resolv.conf only lists the 127.0.0.53 stub,
                 # so ask resolvectl for the real upstream servers first.
@@ -188,8 +189,7 @@ class NetworkDetector:
     def _resolvectl_dns_servers(self):
         """IPv4 DNS servers reported by systemd-resolved, or [] when unavailable."""
         try:
-            result = subprocess.run(['resolvectl', 'dns'], capture_output=True, text=True, timeout=3,
-                                    env=command_env())
+            result = run_command(['resolvectl', 'dns'], timeout=3)
         except (OSError, subprocess.SubprocessError):
             return []
         servers = []
@@ -281,32 +281,18 @@ class NetworkDetector:
                         interface_info['mac'] = addr.address.lower()
                 interfaces.append(interface_info)
 
-            # On Windows, use netsh to get admin state
-            if self.platform == "windows":
-                try:
-                    # Raw bytes: netsh writes UTF-8 to a pipe on current Windows, so the default ANSI
-                    # decoding garbled non-ASCII adapter names ("Yerel Ağ Bağlantısı") and they never matched
-                    result = subprocess.run(['netsh', 'interface', 'show', 'interface'], capture_output=True, check=True)
-                    lines = decode_output(result.stdout).strip().splitlines()
-                    # Skip the header and the dashed separator; the old fixed lines[3:] dropped the first adapter
-                    separator = next((i for i, line in enumerate(lines) if line.startswith('---')), 1)
-                    for line in lines[separator + 1:]:
-                        parts = line.split()
-                        if len(parts) >= 4:
-                            status = parts[0]
-                            name = " ".join(parts[3:])
-                            for iface in interfaces:
-                                if iface['name'] == name:
-                                    iface['status'] = status
-                                    break
-                except (subprocess.CalledProcessError, FileNotFoundError):
-                    pass # netsh might not be available or fail
-            else:
-                stats = psutil.net_if_stats()
-                for iface in interfaces:
-                    st = stats.get(iface['name'])
-                    if st is not None:
-                        iface['status'] = 'Up' if st.isup else 'Down'
+            # Link state from psutil on every OS (netsh's translated multi-word states, e.g. Turkish
+            # "Bağlantı kesildi", could not be split into columns reliably)
+            stats = psutil.net_if_stats()
+            win_types = {a['name']: a['if_type'] for a in self._windows_adapters()} if self.platform == "windows" else {}
+            for iface in interfaces:
+                st = stats.get(iface['name'])
+                if st is not None:
+                    iface['status'] = 'Up' if st.isup else 'Down'
+                if self.platform == "windows":
+                    # Loopback, TAP / OpenVPN DCO style virtual adapters and tunnels
+                    iface['virtual'] = win_types.get(iface['name']) in winnet.IF_TYPES_VIRTUAL
+                else:
                     iface['virtual'] = self.is_virtual_interface(iface['name'])
 
             logging.debug(f"get_network_interfaces - Detected Interfaces: {interfaces}")
@@ -329,15 +315,16 @@ class NetworkDetector:
         
         action = "enable" if state else "disable"
         try:
-            command = ['netsh', 'interface', 'set', 'interface', f'name="{adapter_name}"', f'admin={action}']
-            result = subprocess.run(command, capture_output=True, check=True, shell=True)
+            # Positional name and no shell: subprocess quotes names with spaces itself (the old
+            # name="..." argument went through cmd.exe with escaped quotes)
+            command = ['netsh', 'interface', 'set', 'interface', adapter_name, f'admin={action}']
+            result = run_command(command, timeout=20)
             if result.returncode == 0:
                 return True, f"Adapter '{adapter_name}' {action}d successfully."
-            else:
-                return False, f"Failed to {action} adapter. Error: {decode_output(result.stderr)}"
-        except subprocess.CalledProcessError as e:
-            error = (decode_output(e.stderr) or decode_output(e.stdout)).strip()
+            error = (result.stderr or result.stdout).strip()
             return False, f"Failed to {action} adapter. Make sure to run as administrator. Error: {error}"
+        except subprocess.TimeoutExpired:
+            return False, f"Failed to {action} adapter: netsh did not finish."
         except FileNotFoundError:
             return False, "The 'netsh' command was not found. This script requires it to run."
 
@@ -362,23 +349,10 @@ class NetworkDetector:
         logging.debug(f"Testing local network with gateways: {gateways}")
         for gateway in gateways:
             if gateway != "Unable to determine" and gateway != "N/A":
-                try:
-                    # Try to ping the gateway
-                    if platform.system().lower() == 'windows':
-                        cmd = ['ping', '-n', '1', gateway]
-                    else:
-                        cmd = ['ping', '-c', '1', gateway]
-                    logging.debug(f"Running ping command: {' '.join(cmd)}")
-                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=3,
-                                            encoding=console_encoding(), errors='replace',
-                                            env=command_env())
-                    if result.returncode == 0:
-                        logging.debug(f"Local network test to {gateway} successful")
-                        return True
-                    else:
-                        logging.debug(f"Ping to {gateway} failed with return code {result.returncode}")
-                except Exception as e:
-                    logging.debug(f"Error pinging gateway {gateway}: {str(e)}")
+                if self._ping_host(gateway):
+                    logging.debug(f"Local network test to {gateway} successful")
+                    return True
+                logging.debug(f"Ping to {gateway} got no reply")
         logging.debug("Local network test failed for all gateways")
         return False
     
@@ -393,18 +367,9 @@ class NetworkDetector:
             return False
 
     def _ping_host(self, host):
-        """Helper to ping a host"""
-        try:
-            if platform.system().lower() == 'windows':
-                cmd = ['ping', '-n', '1', '-w', '1000', host]
-            else:
-                cmd = ['ping', '-c', '1', '-W', '1', host]
-            
-            # We don't need the output, just the return code
-            result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=command_env())
-            return result.returncode == 0
-        except:
-            return False
+        """True when one ping gets an echo reply. An "unreachable" answer does not count
+        (Windows ping exits with 0 for it)."""
+        return ping_reply(host, timeout=1) is not None
 
     def detect_network_issues(self, info=None):
         """Diagnose common network issues. Pass `info` to reuse a fresh get_network_info() result."""
@@ -420,7 +385,8 @@ class NetworkDetector:
         # 1. Check for APIPA (169.254.x.x)
         for iface in interfaces:
             ipv4 = iface.get('ipv4', '')
-            if ipv4.startswith('169.254'):
+            # Disconnected adapters always hold an APIPA address on Windows; only a connected one matters
+            if ipv4.startswith('169.254') and iface.get('status') != 'Down':
                 issues.append({
                     "type": "apipa_address",
                     "severity": "warning",
@@ -434,7 +400,8 @@ class NetworkDetector:
 
         # 2. Check for No Default Gateway
         # Only if we have an active interface (excluding loopback and APIPA)
-        active_ifaces = [i for i in interfaces if i.get('ipv4') != 'N/A' and not i.get('ipv4').startswith('127.') and not i.get('ipv4').startswith('169.')]
+        active_ifaces = [i for i in interfaces if i.get('ipv4') != 'N/A' and not i.get('ipv4').startswith('127.')
+                         and not i.get('ipv4').startswith('169.') and i.get('status') != 'Down']
         # Bridges, containers and VPN tunnels are not competing adapters
         physical_active = [i for i in active_ifaces if not i.get('virtual')]
         
@@ -496,20 +463,8 @@ class NetworkDetector:
 
     def _ping_time(self, host, timeout=1):
         """Round-trip time of one ping in ms, or None when there is no reply."""
-        if self.platform == 'windows':
-            cmd = ['ping', '-n', '1', '-w', str(timeout * 1000), host]
-        else:
-            cmd = ['ping', '-c', '1', '-W', str(timeout), host]
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 2,
-                                    encoding=console_encoding(), errors='replace',
-                                    env=command_env())
-        except (OSError, subprocess.SubprocessError):
-            return None
-        if result.returncode != 0:
-            return None
-        match = re.search(r'time[=<]\s*([\d.]+)\s*ms', result.stdout, re.IGNORECASE)
-        return float(match.group(1)) if match else 0.0
+        reply = ping_reply(host, timeout)
+        return reply[0] if reply else None
 
     def probe_connection_path(self, info=None):
         """Check each link of This PC -> Gateway -> DNS -> Internet.

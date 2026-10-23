@@ -89,11 +89,14 @@ class HelpDialog(QDialog):
             self.topics.addItem(item)
         self.topics.currentItemChanged.connect(lambda item, _prev: item and self.load(item.data(Qt.UserRole)))
         side_layout.addWidget(self.topics, 1)
-        online = button("Open online documentation", "ghost", 36)
-        online.setStyleSheet(f"QPushButton {{ background: transparent; color: {Colors.HEADING_BADGE_BG}; "
-                             f"border: 2px solid {Colors.HEADING_BADGE_BG}; border-radius: {Theme.RADIUS_CONTROL}px; }}"
-                             f"QPushButton:hover {{ background: {Colors.HEADING_BADGE_BG}; "
-                             f"color: {Colors.HEADING_BADGE_TEXT}; }}")
+        online = button("Online documentation ↗", "ghost", 36)
+        online.setToolTip("Open the documentation on GitHub in your browser")
+        # Bauhaus: the yellow accent; One Dark: the badge colour is a grey fill, so use the link blue
+        accent, on_accent = ((Colors.HEADING_BADGE_BG, Colors.HEADING_BADGE_TEXT) if Theme.BAUHAUS
+                             else (Colors.BLUE, Colors.ON_PRIMARY))
+        online.setStyleSheet(f"QPushButton {{ background: transparent; color: {accent}; padding: 0 8px; "
+                             f"border: 2px solid {accent}; border-radius: {Theme.RADIUS_CONTROL}px; }}"
+                             f"QPushButton:hover {{ background: {accent}; color: {on_accent}; }}")
         online.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(f"{REPOSITORY}/tree/master/docs")))
         online_row = QHBoxLayout()
         online_row.setContentsMargins(12, 0, 12, 0)

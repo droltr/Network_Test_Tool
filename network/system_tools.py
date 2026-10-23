@@ -1,10 +1,9 @@
 import os
 import shutil
-import subprocess
 import platform
 import logging
 
-from utils.paths import command_env, decode_output
+from utils.paths import run_command
 
 
 
@@ -15,17 +14,10 @@ class SystemTools:
     def _run_command(self, command):
         """Execute a system command and return the output."""
         try:
-            # Windows commands often need shell=True
-            use_shell = self.platform == "windows"
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                shell=use_shell,
-                env=command_env(),
-                timeout=60
-            )
-            # Raw bytes: netsh writes UTF-8, ipconfig the OEM code page; decode_output handles both
-            return result.returncode == 0, decode_output(result.stdout) + decode_output(result.stderr)
+            # No shell (list arguments are quoted by subprocess) and no console window.
+            # Output: netsh writes UTF-8, ipconfig the OEM code page; run_command decodes both.
+            result = run_command(command, timeout=60)
+            return result.returncode == 0, result.stdout + result.stderr
         except Exception as e:
             logging.error(f"Command execution failed: {e}")
             return False, str(e)
@@ -73,9 +65,8 @@ class SystemTools:
         if self.platform == "windows":
             cmd = ["ipconfig", "/renew"]
             if adapter_name:
-                cmd.append(f'"{adapter_name}"')
-            # Join command for shell execution to handle quotes properly
-            return self._run_command(" ".join(cmd))
+                cmd.append(adapter_name)
+            return self._run_command(cmd)
         elif self.platform == "darwin":
             iface = adapter_name or "en0"
             return self._run_command(self._privileged(["ipconfig", "set", iface, "DHCP"]))
@@ -92,8 +83,8 @@ class SystemTools:
         if self.platform == "windows":
             cmd = ["ipconfig", "/release"]
             if adapter_name:
-                cmd.append(f'"{adapter_name}"')
-            return self._run_command(" ".join(cmd))
+                cmd.append(adapter_name)
+            return self._run_command(cmd)
         elif self.platform == "darwin":
             iface = adapter_name or "en0"
             return self._run_command(self._privileged(["ipconfig", "set", iface, "NONE"]))

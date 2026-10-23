@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (QWidget, QFrame, QLabel, QPushButton, QHBoxLayout, 
                              QGraphicsOpacityEffect, QPlainTextEdit, QTableWidget, QHeaderView,
                              QAbstractItemView, QSizePolicy, QCheckBox, QLineEdit, QButtonGroup)
 
-from gui.styles.modern_theme import Colors, Theme, ui_font, mono_font, section_font, rgba
+from gui.styles.modern_theme import Colors, Theme, ui_font, mono_font, section_font, rgba, same_color, fill_color
 
 
 # ---------------------------------------------------------------- helpers
@@ -210,19 +210,23 @@ class StatusDot(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         rect = QRectF(2, 2, self._size, self._size)
-        color = QColor(self._color)
-        if Theme.SHAPES and self._style == "filled" and self._color in (Colors.RED, Colors.YELLOW):
+        filled = self._style == "filled"
+        # Filled marks use the shape variant of the colour (a brighter yellow); outlines keep the text colour
+        color = QColor(fill_color(self._color) if filled else self._color)
+        red = same_color(self._color, Colors.RED)
+        yellow = same_color(self._color, Colors.YELLOW) or same_color(self._color, Colors.YELLOW_FILL)
+        if Theme.SHAPES and filled and (red or yellow):
             # Bauhaus themes code status by shape too: square = problem, triangle = warning
             p.setPen(Qt.NoPen)
             p.setBrush(color)
-            if self._color == Colors.RED:
+            if red:
                 p.drawRect(rect)
             else:
                 p.drawPolygon(QPolygonF([QPointF(rect.center().x(), rect.top()),
                                          QPointF(rect.right() + 1, rect.bottom() + 1),
                                          QPointF(rect.left() - 1, rect.bottom() + 1)]))
             return
-        if self._style == "filled":
+        if filled:
             p.setPen(Qt.NoPen)
             p.setBrush(color)
             p.drawEllipse(rect)
@@ -318,9 +322,9 @@ class Badge(QLabel):
         self.setFont(ui_font(11, 600))
         self.set_tone(color, filled)
 
-    def set_tone(self, color, filled=False):
+    def set_tone(self, color, filled=False, text_color=None):
         if filled:
-            style = f"background: {color}; color: {Colors.ON_STATUS};"
+            style = f"background: {color}; color: {text_color or Colors.ON_STATUS};"
         else:
             style = f"background: {rgba(color, 0.14)}; color: {color};"
         radius = 0 if Theme.BAUHAUS else 8
@@ -540,10 +544,25 @@ def bg_to_qcolor(css_rgba):
 
 # ---------------------------------------------------------------- tables
 
+# Units keep their case in upper-case headers, because case is part of their meaning: Mb (megabit) is
+# not MB (megabyte), ms is not MS. Data sizes and rates (kB, MB, Mb, KiB, Gb/s, Mbps, kbit), time
+# (s, ms, µs, min), frequency, dB and %.
+_UNIT = re.compile(r"^(?:[kKMGTP]i?[bB](?:ps)?|[kKMGT]?bits?(?:ps)?|[nmµu]?s|min|[kMG]?Hz|dBm?|%)$")
+
+
+def header_caps(text):
+    """Upper-case a column title except for units such as Gb/s, Mbps, MB or ms. A compound token with a
+    unit part (ms/hop, pkt/s) keeps its case as a whole, so it is never half upper-cased."""
+    def caps(match):
+        word = match.group(0)
+        return word if any(_UNIT.match(part) for part in word.split("/")) else word.upper()
+    return re.sub(r"[^\s()\[\],·]+", caps, text)
+
+
 def make_table(columns, stretch_column=None, row_height=32, embedded=False):
     """Design table: section-label header, fixed 32px rows, no grid or vertical header."""
     table = QTableWidget(0, len(columns))
-    table.setHorizontalHeaderLabels([c.upper() for c in columns])
+    table.setHorizontalHeaderLabels([header_caps(c) for c in columns])
     table.verticalHeader().setVisible(False)
     table.verticalHeader().setDefaultSectionSize(row_height)
     table.setShowGrid(False)
@@ -583,7 +602,9 @@ def cell_widget(*widgets, margins=(14, 0, 8, 0)):
     layout.setContentsMargins(*margins)
     layout.setSpacing(6)
     for widget in widgets:
-        layout.addWidget(widget)
+        # Vertically centred at its own height, so badges do not stretch to the row height
+        widget.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        layout.addWidget(widget, 0, Qt.AlignVCenter)
     layout.addStretch(1)
     return holder
 

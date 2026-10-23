@@ -4,7 +4,7 @@ import ipaddress
 from typing import List, Dict, Optional, Callable
 import time
 
-from utils.paths import command_env
+from network.ping import ping_reply
 
 
 class PortScanner:
@@ -128,15 +128,10 @@ class NetworkScanner:
             if result == 0:
                 return True
             
-            # If port 80 fails, try ICMP ping using os command
-            import subprocess
-            import platform
-            
-            param = '-n' if platform.system().lower() == 'windows' else '-c'
-            command = ['ping', param, '1', host]
-            
-            result = subprocess.run(command, capture_output=True, timeout=timeout, env=command_env())
-            return result.returncode == 0
+            # If port 80 fails, try ICMP ping. The shared helper waits `timeout` for the reply (the old
+            # call used Windows' 4 s default wait and was killed after `timeout`) and does not count
+            # an "unreachable" answer, for which Windows ping exits with 0.
+            return ping_reply(host, timeout) is not None
             
         except Exception:
             return False

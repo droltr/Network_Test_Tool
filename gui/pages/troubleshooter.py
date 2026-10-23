@@ -4,7 +4,7 @@ from datetime import datetime
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtWidgets import QWidget, QFrame, QHBoxLayout, QVBoxLayout, QStackedWidget
 
-from gui.pages.base import Page
+from gui.pages.base import Page, finish_thread
 from gui.styles.modern_theme import Colors, mono_font, ui_font
 from gui.widgets.common import (Card, Label, LogPane, EmptyPane, StatusDot, PulseDot, section_label, button,
                                 hbox, clear_layout, set_prop)
@@ -27,10 +27,18 @@ class TroubleshootThread(QThread):
     step_event = pyqtSignal(str, str, str)
     test_complete = pyqtSignal(str)
 
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.troubleshooter = Troubleshooter()
+
     def run(self):
-        log = Troubleshooter().run_troubleshooting(progress_callback=self.progress_update.emit,
-                                                   event_callback=self.step_event.emit)
+        log = self.troubleshooter.run_troubleshooting(progress_callback=self.progress_update.emit,
+                                                      event_callback=self.step_event.emit)
         self.test_complete.emit(log)
+
+    def stop(self):
+        """Cancel the run: ends the current ping and terminates the traceroute process."""
+        self.troubleshooter.stop()
 
 
 class FlushThread(QThread):
@@ -250,6 +258,7 @@ class TroubleshooterPage(Page):
         self.save_text("Save Log File", f"troubleshoot_log_{timestamp}.txt", self.log.plain_text() + "\n")
 
     def cleanup(self):
+        if self.thread and self.thread.isRunning():
+            self.thread.stop()
         for thread in (self.thread, self.flush_thread):
-            if thread and thread.isRunning():
-                thread.wait(15000)
+            finish_thread(thread, 15000)

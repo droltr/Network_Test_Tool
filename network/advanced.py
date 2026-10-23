@@ -6,7 +6,11 @@ import logging
 import psutil
 import socket
 
-from utils.paths import command_env, console_encoding
+from utils.paths import run_command
+
+# arp -a section header, e.g. "Interface: 10.90.0.3 --- 0x9" (Turkish "Arabirim: 10.90.0.3 --- 0x9"):
+# matched by its shape because the label is translated
+ARP_HEADER_RE = re.compile(r'^\S.*?:\s*(\d{1,3}(?:\.\d{1,3}){3})\s+---\s+0x[0-9a-f]+', re.IGNORECASE)
 
 
 
@@ -19,8 +23,7 @@ class AdvancedDiagnostics:
         entries = []
         try:
             if self.platform == "windows":
-                # Run arp -a
-                result = subprocess.run(['arp', '-a'], capture_output=True, text=True, encoding=console_encoding(), errors='replace')
+                result = run_command(['arp', '-a'], timeout=10)
                 lines = result.stdout.split('\n')
 
                 current_interface = None
@@ -29,9 +32,9 @@ class AdvancedDiagnostics:
                     line = line.strip()
                     if not line: continue
 
-                    # Check for Interface header
-                    if line.startswith("Interface:"):
-                        current_interface = line.split()[1]
+                    header = ARP_HEADER_RE.match(line)
+                    if header:
+                        current_interface = header.group(1)
                         continue
 
                     # Parse entry lines (IP, MAC, Type)
@@ -40,10 +43,12 @@ class AdvancedDiagnostics:
                     if len(parts) == 3:
                         # Basic validation to ensure it looks like an ARP entry
                         if parts[0][0].isdigit() and '-' in parts[1]:
+                            # The type word is translated too ("statik", "statisch", "estático")
+                            kind = parts[2].lower()
                             entries.append({
                                 'ip': parts[0],
                                 'mac': parts[1],
-                                'type': parts[2],
+                                'type': 'static' if 'stat' in kind or 'stát' in kind else 'dynamic',
                                 'interface': current_interface
                             })
             elif self.platform == "linux":
@@ -60,8 +65,7 @@ class AdvancedDiagnostics:
         """IPv4 neighbour table from `ip neigh`, falling back to /proc/net/arp."""
         entries = []
         try:
-            result = subprocess.run(['ip', '-4', 'neigh', 'show'], capture_output=True, text=True,
-                                    env=command_env(), timeout=5)
+            result = run_command(['ip', '-4', 'neigh', 'show'], timeout=5)
             # Example: 192.168.1.1 dev eth0 lladdr f4:92:bf:0a:11:3c REACHABLE
             for line in result.stdout.splitlines():
                 match = re.match(r'(\S+) dev (\S+) lladdr (\S+)(?: router)?(?: proxy)? (\S+)', line.strip())
@@ -97,7 +101,7 @@ class AdvancedDiagnostics:
     def _bsd_arp(self):
         """macOS / BSD `arp -an` output: ? (192.168.1.1) at f4:92:.. on en0 ifscope [ethernet]"""
         entries = []
-        result = subprocess.run(['arp', '-an'], capture_output=True, text=True, env=command_env())
+        result = run_command(['arp', '-an'], timeout=10)
         for line in result.stdout.splitlines():
             match = re.search(r'\((\S+)\) at (\S+) on (\S+)(.*)', line)
             if match and match.group(2) != '(incomplete)':
@@ -159,25 +163,23 @@ class AdvancedDiagnostics:
         """
         if self.platform == "windows":
             command = ['nbtstat', '-A', ip_address]
-            encoding = console_encoding()
         else:
             if not shutil.which('nmblookup'):
                 return {'ok': False, 'output': '',
                         'error': "nmblookup was not found. Install the samba-client package to use NetBIOS lookups."}
             command = ['nmblookup', '-A', ip_address]
-            encoding = None
 
         try:
-            result = subprocess.run(command, capture_output=True, text=True, encoding=encoding, errors='replace',
-                                    env=command_env(), timeout=15)
+            result = run_command(command, timeout=15)
         except subprocess.TimeoutExpired:
             return {'ok': False, 'output': '', 'error': f"No response from {ip_address}"}
         except Exception as e:
             return {'ok': False, 'output': '', 'error': str(e)}
 
         output = (result.stdout + result.stderr).strip()
-        no_reply = (result.returncode != 0 or 'No reply' in output
-                    or 'Host not found' in output or '<' not in output)
+        # A reply is a NetBIOS name table: names with a <xx> suffix ("WORKSTATION <00> UNIQUE").
+        # nbtstat exits with 0 and prints a translated "Host not found." for silent hosts.
+        no_reply = result.returncode != 0 or not re.search(r'<[0-9A-Fa-f]{2}>', output)
         return {'ok': not no_reply, 'output': output,
                 'error': f"No response from {ip_address}" if no_reply else None}
 

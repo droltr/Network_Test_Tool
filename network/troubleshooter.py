@@ -1,18 +1,29 @@
 import platform
-import subprocess
-import socket
 from datetime import datetime
 from .detector import NetworkDetector
 from .ping import PingTester
 from .speed_test import SpeedTester
+from .trace import TraceRoute
 
-from utils.paths import command_env, console_encoding
+
+class _Stopped(Exception):
+    """Raised between steps after Troubleshooter.stop()."""
+
 
 class Troubleshooter:
     def __init__(self):
         self.detector = NetworkDetector()
         self.ping_tester = PingTester()
         self.speed_tester = SpeedTester()
+        self.tracer = TraceRoute()
+        self.stopped = False
+
+    def stop(self):
+        """Cancel a running run_troubleshooting(): ends the current ping and the traceroute process
+        and skips the remaining steps."""
+        self.stopped = True
+        self.ping_tester.stop()
+        self.tracer.stop()
 
     # Step ids reported through event_callback, in execution order
     STEPS = ('info', 'gateway', 'dns', 'external', 'trace')
@@ -21,6 +32,13 @@ class Troubleshooter:
         """Run all checks. progress_callback gets each log line; event_callback(step, status, value)
         gets structured step updates (status: running, done, failed, partial, skipped)."""
         log = []
+        try:
+            self._run_steps(log, progress_callback, event_callback)
+        except _Stopped:
+            log.append("\n--- Troubleshooting stopped ---")
+        return "\n".join(log)
+
+    def _run_steps(self, log, progress_callback, event_callback):
         def log_and_callback(message):
             log.append(message)
             if progress_callback:
@@ -31,8 +49,12 @@ class Troubleshooter:
                 event_callback(step, status, value)
 
         def ping_step(step, host):
+            if self.stopped:
+                raise _Stopped
             event(step, 'running', host)
             ping_result = self.ping_tester.ping_host(host, count=3)
+            if self.stopped:
+                raise _Stopped
             if ping_result and not ping_result.get('error') and 'avg_time' in ping_result.get('statistics', {}):
                 avg = ping_result['statistics']['avg_time']
                 event(step, 'done', f"{avg:.2f} ms")
@@ -114,60 +136,45 @@ class Troubleshooter:
             log_and_callback("        [SUGGESTION] Verify firewall settings are not blocking traffic.\n")
 
         # 3. Traceroute
+        if self.stopped:
+            raise _Stopped
         log_and_callback("3. Performing Traceroute to 1.1.1.1...")
         event('trace', 'running', "1.1.1.1")
-        trace_log = self.run_traceroute("1.1.1.1", progress_callback)
+        trace_log, hops = self.run_traceroute("1.1.1.1", progress_callback)
         log.extend(trace_log)
-        event('trace', *self._summarize_trace(trace_log, "1.1.1.1"))
+        if self.stopped:
+            raise _Stopped
+        event('trace', *self._summarize_trace(hops))
 
         log_and_callback("\n--- Troubleshooting Complete ---")
-        return "\n".join(log)
 
     @staticmethod
-    def _summarize_trace(lines, target):
-        """(status, value) for the traceroute step from its raw output lines."""
-        if any("not found" in line or "error occurred" in line for line in lines):
+    def _summarize_trace(hops):
+        """(status, value) for the traceroute step from the parsed hops of TraceRoute."""
+        if any('error' in hop for hop in hops):
             return 'failed', "not available"
-        last_reply = 0
-        for line in lines:
-            parts = line.split()
-            if len(parts) >= 2 and parts[0].isdigit() and parts[1] != '*' and 'Request' not in line:
-                last_reply = int(parts[0])
-                if target in parts[1:]:
-                    return 'done', f"{last_reply} hops"
-        if last_reply == 0:
+        replied = [hop['hop'] for hop in hops if hop.get('status') == 'ok']
+        reached = [hop['hop'] for hop in hops if hop.get('destination')]
+        if reached:
+            return 'done', f"{reached[0]} hops"
+        if not replied:
             return 'failed', "no reply"
-        return 'partial', f"stopped at hop {last_reply}"
+        return 'partial', f"stopped at hop {max(replied)}"
 
     def run_traceroute(self, host, progress_callback=None):
-        log = []
+        """Trace to host with up to 15 hops. Returns (raw output lines, parsed hop dicts)."""
+        log, hops = [], []
         def log_and_callback(message):
             log.append(message)
             if progress_callback:
                 progress_callback(message)
 
-        try:
-            if platform.system().lower() == "windows":
-                command = ["tracert", "-d", "-h", "15", "-w", "1000", host]
-            else:
-                command = ["traceroute", "-n", "-m", "15", "-q", "1", host]
-            
-            env = command_env()
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                       universal_newlines=True, encoding=console_encoding(), errors="replace",
-                                       env=env)
+        def on_hop(hop):
+            hops.append(hop)
+            if 'error' in hop:
+                log_and_callback(f"Traceroute failed: {hop['error']}")
 
-            for line in iter(process.stdout.readline, ''):
-                log_and_callback(line.strip())
-            
-            process.stdout.close()
-            return_code = process.wait()
-            if return_code != 0:
-                log_and_callback(f"Traceroute finished with error code {return_code}")
-
-        except FileNotFoundError:
-            log_and_callback("Traceroute command not found. Skipping.")
-        except Exception as e:
-            log_and_callback(f"An error occurred during traceroute: {e}")
-        
-        return log
+        # TraceRoute parses the hops by structure, so translated tracert output is understood too,
+        # and stop() can terminate the process
+        self.tracer.run_trace(host, on_hop, max_hops=15, line_callback=log_and_callback)
+        return log, hops

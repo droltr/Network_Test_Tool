@@ -1,15 +1,16 @@
 """iPerf3: client against public or custom servers, and a built-in iperf3-compatible server."""
 import socket
-import time
+import threading
 from datetime import datetime
 
 import psutil
 from PyQt5.QtCore import Qt, QThread, QSettings, pyqtSignal
 from PyQt5.QtGui import QColor
-from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget, QButtonGroup, QComboBox,
-                             QSpinBox, QTableWidgetItem, QApplication, QAbstractItemView, QHeaderView)
+from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget, QButtonGroup, QComboBox, QAction,
+                             QSpinBox, QTableWidgetItem, QApplication, QAbstractItemView, QHeaderView,
+                             QSizePolicy)
 
-from gui.pages.base import Page
+from gui.pages.base import Page, finish_thread
 from gui.recent import recent_store
 from gui.styles.modern_theme import Colors, mono_font, ui_font
 from gui.widgets.charts import ThroughputChart, SpeedGauge
@@ -49,11 +50,14 @@ class ClientThread(QThread):
         self.streams, self.duration = streams, duration
         self.client = None
         self._stopped = False
+        self._stop_event = threading.Event()
 
-    def stop(self):
+    def stop(self, force=False):
+        """force=True also skips the result exchange of a running test (used when the app closes)."""
         self._stopped = True
+        self._stop_event.set()
         if self.client:
-            self.client.stop()
+            self.client.stop(force)
 
     def run(self):
         results = {'host': self.host, 'streams': self.streams, 'duration': self.duration, 'tests': {}}
@@ -70,6 +74,8 @@ class ClientThread(QThread):
                     reverse=direction == "download",
                     interval_callback=lambda s, d=direction: self.interval.emit(d, s['t'], s['mbps']),
                     log_callback=self.log.emit)
+                if self._stopped:   # stop() came while the client was being created
+                    self.client.stop()
                 result = self.client.run()
                 if not result['error']:
                     port_index = (port_index + attempt + 1) % len(self.ports)
@@ -79,12 +85,12 @@ class ClientThread(QThread):
                 if not retry or len(self.ports) == 1 and attempt >= 1:
                     break
                 self.log.emit("Trying the next port of this server…")
-                time.sleep(1.5)
+                self._stop_event.wait(1.5)
             results['tests'][direction] = result
             if result['error'] and not self._stopped:
                 break
             if direction != self.directions[-1]:
-                time.sleep(1.5)   # public servers restart between tests
+                self._stop_event.wait(1.5)   # public servers restart between tests
         results['stopped'] = self._stopped
         self.done.emit(results)
 
@@ -99,8 +105,46 @@ class ServerThread(QThread):
     def run(self):
         self.server.serve_forever()
 
-    def stop(self):
+    def stop(self, force=False):
         self.server.stop()
+
+
+class CommandLabel(Label):
+    """Monospace command lines that never wrap; a line that does not fit is elided in the middle (so a
+    trailing -R stays visible) and the full commands are shown in the tooltip.
+
+    Mouse selection is off because it would copy the elided text; the context menu and the page's
+    "Copy command" button always copy the full commands."""
+
+    def __init__(self):
+        super().__init__("", 11.5, color=Colors.TEXT_MUTED, mono=True)
+        self.full_text = ""
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.setContextMenuPolicy(Qt.ActionsContextMenu)
+        copy = QAction("Copy command", self)
+        copy.triggered.connect(lambda: QApplication.clipboard().setText(self.full_text))
+        self.addAction(copy)
+
+    def set_command(self, text):
+        self.full_text = text
+        self._elide()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._elide()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._elide()   # the first set_command() runs before the layout has given the label a width
+
+    def _elide(self):
+        metrics = self.fontMetrics()
+        # 2 px slack: at fractional scale factors the drawn text can be a pixel wider than measured
+        width = max(self.contentsRect().width() - 2, 40)
+        text = "\n".join(metrics.elidedText(line, Qt.ElideMiddle, width) for line in self.full_text.splitlines())
+        if text != self.text():
+            self.setText(text)
+        self.setToolTip(self.full_text if text != self.full_text else "")
 
 
 class ServerListThread(QThread):
@@ -257,15 +301,13 @@ class IperfPage(Page):
                                  spacing=6))
         form.body.addLayout(hbox(Label("Duration", 12, color=Colors.TEXT_MUTED), self.duration_combo, "stretch",
                                  spacing=6))
-        self.command_label = Label("", 11.5, color=Colors.TEXT_MUTED, mono=True)
-        self.command_label.setWordWrap(True)
-        self.command_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        # The commands get their own full-width row so arguments are never split across lines
+        self.command_label = CommandLabel()
         copy_cmd = link_button("Copy command")
         copy_cmd.clicked.connect(lambda: QApplication.clipboard().setText(self.command_text))
         terminal_label = Label("Same test in a terminal:", 11.5, color=Colors.TEXT_MUTED)
-        terminal_label.setAlignment(Qt.AlignTop)
-        self.command_label.setAlignment(Qt.AlignTop)
-        form.body.addLayout(hbox(terminal_label, self.command_label, "stretch", copy_cmd, spacing=6))
+        form.body.addLayout(hbox(terminal_label, "stretch", copy_cmd, spacing=6))
+        form.body.addWidget(self.command_label)
         right.addWidget(form)
 
         # Results area
@@ -413,8 +455,7 @@ class IperfPage(Page):
         else:
             text = iperf_command(host, ports[0], direction, streams, duration)
         self.command_text = text
-        # Non-breaking hyphens keep options like -p 30001 on one line when the label wraps
-        self.command_label.setText(text.replace("-", "\u2011"))
+        self.command_label.set_command(text)
 
     def start_client(self):
         if self.client_running:
@@ -677,7 +718,8 @@ class IperfPage(Page):
     def cleanup(self):
         for thread in (self.client_thread, self.server_thread):
             if thread and thread.isRunning():
-                thread.stop()
-                thread.wait(8000)
-        if self.list_thread and self.list_thread.isRunning():
-            self.list_thread.wait(5000)
+                thread.stop(force=True)
+                # Both stop within a second; only a DNS lookup cannot be interrupted, and then the
+                # thread is detached instead of blocking the exit
+                finish_thread(thread, 3000)
+        finish_thread(self.list_thread, 3000)

@@ -3,11 +3,11 @@ import socket
 from datetime import datetime
 
 from PyQt5.QtCore import QLocale, QThread, QSettings, pyqtSignal
-from PyQt5.QtGui import QColor
+from PyQt5.QtGui import QColor, QFontMetrics
 from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget, QComboBox,
                              QDoubleSpinBox, QProgressBar, QCompleter, QApplication, QTableWidgetItem)
 
-from gui.pages.base import Page
+from gui.pages.base import Page, finish_thread
 from gui.recent import recent_store
 from gui.styles.modern_theme import Colors, mono_font, ui_font
 from gui.widgets.common import (Card, Label, LineInput, EmptyPane, ErrorCard, section_label, button,
@@ -91,7 +91,9 @@ class PortScannerPage(Page):
         self.timeout_input.setSuffix(" s")
         self.timeout_input.setFont(mono_font(12))
         self.timeout_input.setLocale(QLocale.c())
-        self.timeout_input.setFixedSize(136, 34)
+        # Room for the widest value; the spin box keeps some space for its hidden arrows
+        widest = QFontMetrics(self.timeout_input.font()).horizontalAdvance("timeout 10.0 s")
+        self.timeout_input.setFixedSize(widest + 52, 34)
         self.timeout_input.setButtonSymbols(QDoubleSpinBox.NoButtons)
         self.scan_btn = button("Scan", "primary", 34, width=66)
         self.scan_btn.clicked.connect(self.start_scan)
@@ -403,5 +405,4 @@ class PortScannerPage(Page):
 
     def cleanup(self):
         self.stop_scan()
-        if self.scan_thread and self.scan_thread.isRunning():
-            self.scan_thread.wait(5000)
+        finish_thread(self.scan_thread, 5000)

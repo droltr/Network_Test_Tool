@@ -4,9 +4,10 @@ import os
 from PyQt5.QtCore import Qt, QThread, QSettings, QStandardPaths, QUrl, pyqtSignal
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import (QDialog, QHBoxLayout, QVBoxLayout, QWidget, QCheckBox, QComboBox, QPlainTextEdit,
-                             QListWidget, QListWidgetItem, QApplication, QAbstractItemView)
+                             QListWidget, QListWidgetItem, QApplication, QAbstractItemView, QSizePolicy)
 
 from gui.file_dialogs import get_existing_directory, get_save_file_name
+from gui.pages.base import finish_thread
 from gui.recent import recent_store, KIND_TITLES
 from gui.styles.modern_theme import Colors, mono_font, ui_font
 from gui.widgets.common import (Card, Label, LineInput, section_label, button, link_button, hbox, chip_group,
@@ -22,6 +23,29 @@ class SnapshotThread(QThread):
             self.done.emit(ai_handoff.collect_system_snapshot())
         except Exception as e:
             self.done.emit(e)
+
+
+class StatusLabel(Label):
+    """One-line status that never widens the dialog: a long text (a saved file path) is elided in the
+    middle, so the file name stays visible, and shown in full in the tooltip."""
+
+    def __init__(self):
+        super().__init__("", 12, color=Colors.TEXT_MUTED)
+        self.full_text = ""
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+
+    def set_status(self, text):
+        self.full_text = text
+        self._elide()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._elide()
+
+    def _elide(self):
+        text = self.fontMetrics().elidedText(self.full_text, Qt.ElideMiddle, max(self.contentsRect().width() - 2, 40))
+        self.setText(text)
+        self.setToolTip(self.full_text if text != self.full_text else "")
 
 
 def default_folder():
@@ -65,6 +89,9 @@ class AskAiDialog(QDialog):
         self.results_list = QListWidget()
         self.results_list.setSelectionMode(QAbstractItemView.NoSelection)
         self.results_list.setFixedHeight(130)
+        # Long rows end in an ellipsis (full text in the tooltip) instead of being cut off
+        self.results_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.results_list.setTextElideMode(Qt.ElideRight)
         self.results_list.setStyleSheet(f"QListWidget {{ background: {Colors.BG_SUNKEN}; border: 1px solid "
                                         f"{Colors.BORDER}; border-radius: 6px; }}")
         include.body.addWidget(self.results_list)
@@ -96,7 +123,8 @@ class AskAiDialog(QDialog):
         privacy = Card(margins=(14, 12, 14, 12), spacing=6)
         privacy.body.addWidget(section_label("Privacy"))
         self.mask_mac = QCheckBox("Mask MAC addresses")
-        self.mask_ip = QCheckBox("Mask public IP addresses (local addresses stay visible)")
+        self.mask_ip = QCheckBox("Mask public IP addresses")
+        self.mask_ip.setToolTip("Local addresses stay visible")
         self.mask_host = QCheckBox("Mask the computer name")
         for box in (self.mask_mac, self.mask_ip, self.mask_host):
             box.setChecked(True)
@@ -106,7 +134,7 @@ class AskAiDialog(QDialog):
 
         left = QWidget()
         left.setLayout(options)
-        left.setFixedWidth(400)
+        left.setFixedWidth(450)
         root.addWidget(left)
 
         # ---------------------------------------------------------------- preview and output
@@ -121,6 +149,8 @@ class AskAiDialog(QDialog):
         self.preview.setFont(mono_font(11.5))
         self.preview.setStyleSheet(f"QPlainTextEdit {{ border: 1px solid {Colors.BORDER}; border-radius: 8px; }}")
         self.preview.document().setDocumentMargin(10)
+        # The package is already wrapped; soft-wrapping it again breaks lines raggedly
+        self.preview.setLineWrapMode(QPlainTextEdit.NoWrap)
         right.addWidget(self.preview, 1)
 
         self.folder_input = LineInput("Save folder", height=32)
@@ -136,16 +166,16 @@ class AskAiDialog(QDialog):
         self.save_btn.clicked.connect(self.save_to_folder)
         self.save_as_btn = button("Save as…", "secondary", 34)
         self.save_as_btn.clicked.connect(self.save_as)
-        self.status = Label("", 12, color=Colors.TEXT_MUTED)
-        self.status.setWordWrap(True)
+        self.status = StatusLabel()
         self.open_folder = link_button("Open folder")
         self.open_folder.setVisible(False)
         self.open_folder.clicked.connect(lambda: QDesktopServices.openUrl(
             QUrl.fromLocalFile(os.path.dirname(self.last_saved))))
         close = button("Close", "secondary", 34)
         close.clicked.connect(self.accept)
-        right.addLayout(hbox(self.copy_btn, self.save_btn, self.save_as_btn, 10, self.status, self.open_folder,
-                             "stretch", close, spacing=8))
+        right.addLayout(hbox(self.copy_btn, self.save_btn, self.save_as_btn, "stretch", close, spacing=8))
+        # Status on its own row: a long saved path must not squeeze the buttons
+        right.addLayout(hbox(self.status, self.open_folder, spacing=8))
         hint = Label("Then open your AI assistant and paste (Ctrl+V), or attach the saved .md file.", 11.5,
                      color=Colors.TEXT_MUTED)
         right.addWidget(hint)
@@ -170,6 +200,7 @@ class AskAiDialog(QDialog):
             text = (f"{KIND_TITLES.get(entry['kind'], entry['kind'])} · {entry['target']} · {entry['summary']} · "
                     f"{relative_time(entry['time'])}")
             item = QListWidgetItem(text)
+            item.setToolTip(text)
             item.setFont(ui_font(12))
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             item.setCheckState(Qt.Checked if index < 5 else Qt.Unchecked)
@@ -271,10 +302,12 @@ class AskAiDialog(QDialog):
             self.write(path)
 
     def show_status(self, text, color):
-        self.status.setText(text)
+        self.status.set_status(text)
         self.status.set_color(color)
 
     def done(self, result):
-        if self.thread and self.thread.isRunning():
-            self.thread.wait(10000)
+        # The snapshot runs system commands; a slow one is detached rather than blocking the close
+        if not finish_thread(self.thread, 3000):
+            self.thread.done.disconnect()
+            self.thread = None
         super().done(result)

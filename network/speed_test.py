@@ -7,7 +7,7 @@ from typing import Optional, Callable, Dict
 
 import psutil
 
-from utils.paths import command_env, console_encoding
+from utils.paths import run_command
 
 try:
     # Bundled, unmodified copy of speedtest-cli by Matt Martz (Apache 2.0),
@@ -295,38 +295,20 @@ class SpeedTester:
     
     def test_latency(self, host: str = "8.8.8.8", count: int = 4) -> Dict:
         """Test network latency to a specific host."""
-        import subprocess
-        import platform
-        import re
-        
+        from network.ping import parse_ping_output, ping_command
+
         try:
-            # Determine ping command based on OS
-            if platform.system().lower() == 'windows':
-                cmd = ['ping', '-n', str(count), host]
-            else:
-                cmd = ['ping', '-c', str(count), host]
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=command_env(),
-                                    encoding=console_encoding(), errors='replace')
-            
-            if result.returncode == 0:
-                output = result.stdout
-                
-                # Extract latency values (this is OS-specific)
-                if platform.system().lower() == 'windows':
-                    times = re.findall(r'time[<=](\d+)ms', output)
-                else:
-                    times = re.findall(r'time=(\d+\.?\d*)', output)
-                
-                if times:
-                    latencies = [float(t) for t in times]
-                    return {
-                        'avg_latency': round(sum(latencies) / len(latencies), 2),
-                        'min_latency': round(min(latencies), 2),
-                        'max_latency': round(max(latencies), 2),
-                        'packet_loss': 0,  # Could be extracted from ping output
-                        'host': host
-                    }
+            result = run_command(ping_command(host, timeout=2, count=count), timeout=30)
+            # Shared parser: understands translated Windows output and ignores "unreachable" replies
+            latencies = [ms for ms, _ttl in parse_ping_output(result.stdout)]
+            if latencies:
+                return {
+                    'avg_latency': round(sum(latencies) / len(latencies), 2),
+                    'min_latency': round(min(latencies), 2),
+                    'max_latency': round(max(latencies), 2),
+                    'packet_loss': round(100 * (count - len(latencies)) / count, 1),
+                    'host': host
+                }
             
             return {
                 'avg_latency': 0,

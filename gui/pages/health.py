@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget, 
 from PyQt5.QtCore import QTimer
 
 from gui.file_dialogs import get_existing_directory
-from gui.pages.base import Page
+from gui.pages.base import Page, finish_thread
 from gui.recent import recent_store
 from gui.styles.modern_theme import Colors, mono_font, ui_font
 from gui.widgets.common import (Card, Label, LineInput, EmptyPane, StatusDot, PulseDot, section_label, button,
@@ -87,7 +87,7 @@ class AvailabilityTimeline(QWidget):
         label_w = 86
         targets = list(self.rows)
         if not targets:
-            p.setPen(QColor(Colors.TEXT_FAINT))
+            p.setPen(QColor(Colors.TEXT_MUTED))
             p.setFont(ui_font(12))
             p.drawText(self.rect(), Qt.AlignCenter, "Start the monitor to see availability over time")
             return
@@ -108,7 +108,7 @@ class AvailabilityTimeline(QWidget):
             for j, ok in enumerate(values):
                 p.setBrush(QColor(Colors.GREEN if ok else Colors.RED))
                 p.drawRect(QRectF(label_w + (offset + j) * cell, y + 3, max(cell, 1.0), row_h - 10))
-        p.setPen(QColor(Colors.TEXT_FAINT))
+        p.setPen(QColor(Colors.TEXT_MUTED))
         p.setFont(mono_font(10.5))
         p.drawText(QRectF(label_w, self.height() - 16, width, 14), Qt.AlignLeft, f"−{self.capacity} probes")
         p.drawText(QRectF(label_w, self.height() - 16, width, 14), Qt.AlignRight, "now")
@@ -646,7 +646,6 @@ class HealthPage(Page):
                 pass
         if self.monitor_thread and self.monitor_thread.isRunning():
             self.monitor_thread.stop()
-            self.monitor_thread.wait(8000)
+            finish_thread(self.monitor_thread, 8000)
         for thread in (self.scan_thread, self.action_thread):
-            if thread and thread.isRunning():
-                thread.wait(20000)
+            finish_thread(thread, 20000)

@@ -4,7 +4,7 @@ Group headings are labels, never links: they look different from the clickable i
 every theme (One Dark: small muted caps under a rule; Bauhaus: a numbered yellow tag).
 """
 from PyQt5.QtCore import Qt, QRectF, QPointF, pyqtSignal
-from PyQt5.QtGui import QPainter, QPainterPath, QColor, QFontMetrics, QPen
+from PyQt5.QtGui import QPainter, QPainterPath, QColor, QFont, QFontMetrics, QPen
 from PyQt5.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QLabel, QWidget
 
 from version import __version__
@@ -71,7 +71,7 @@ class NavItem(QFrame):
         layout.addWidget(self.running_dot)
         self.badge = Badge("", Colors.RED, filled=True)
         self.badge.setVisible(False)
-        layout.addWidget(self.badge)
+        layout.addWidget(self.badge, 0, Qt.AlignVCenter)
         self.arrow = QLabel("→")
         self.arrow.setFont(ui_font(size, 700))
         self.arrow.setVisible(False)
@@ -91,6 +91,11 @@ class NavItem(QFrame):
             # Filled square for the current page, outlined square for the others
             self.marker.setStyleSheet(f"background: {color if active else 'transparent'}; "
                                       f"border: 2px solid {color};")
+            # The active row is red here, so the red count badge flips to light-on-red
+            if active:
+                self.badge.set_tone(Colors.NAV_ACTIVE_TEXT, filled=True, text_color=Colors.NAV_ACTIVE_BG)
+            else:
+                self.badge.set_tone(Colors.RED, filled=True)
         self.active = active
         self.update()
 
@@ -182,14 +187,17 @@ class Sidebar(QFrame):
         layout.setSpacing(0)
 
         title = QHBoxLayout()
-        title.setContentsMargins(16 if bauhaus else 15, 0, 15, 0)
+        title.setContentsMargins(16 if bauhaus else 15, 0, 12 if bauhaus else 15, 0)
         title.setSpacing(10 if bauhaus else 8)
         if bauhaus:
             title.addWidget(AppMark(30))
             name = QVBoxLayout()
             name.setSpacing(0)
             heading = QLabel("NETWORK TEST")
-            heading.setFont(section_font(14))
+            # Tighter tracking than other section labels so the name fits beside the mark
+            font = section_font(13.5)
+            font.setLetterSpacing(QFont.AbsoluteSpacing, 13.5 * 0.1)
+            heading.setFont(font)
             heading.setStyleSheet(f"color: {Colors.SIDEBAR_TEXT}; background: transparent;")
             name.addWidget(heading)
             name.addWidget(Label(f"v{__version__}", 10.5, color=Colors.SIDEBAR_MUTED, mono=True))

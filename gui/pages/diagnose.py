@@ -6,7 +6,7 @@ from PyQt5.QtCore import Qt, QThread, QSettings, pyqtSignal
 from PyQt5.QtWidgets import (QWidget, QFrame, QHBoxLayout, QVBoxLayout, QGridLayout, QStackedWidget,
                              QProgressBar, QCompleter, QScrollArea)
 
-from gui.pages.base import Page
+from gui.pages.base import Page, finish_thread
 from gui.recent import recent_store
 from gui.styles.modern_theme import Colors
 from gui.widgets.charts import LatencyChart
@@ -193,7 +193,7 @@ class DiagnosePage(Page):
         result_layout.setSpacing(12)
         self.results_strip = StatStrip([("sent", "Sent"), ("received", "Received"), ("lost", "Lost"),
                                         ("min", "Min"), ("avg", "Avg"), ("max", "Max"),
-                                        ("hops", "Hops"), ("noreply", "No reply")])
+                                        ("hops", "Hops"), ("noreply", "Silent hops")])
         result_layout.addWidget(self.results_strip)
         panes = QHBoxLayout()
         panes.setSpacing(12)
@@ -477,11 +477,11 @@ class DiagnosePage(Page):
             if silent:
                 self.results_strip.set("noreply", "hop " + ", ".join(map(str, silent)), Colors.RED)
             else:
-                self.results_strip.set("noreply", "none", Colors.TEXT_STRONG)
+                self.results_strip.set("noreply", "0", Colors.TEXT_STRONG)
         else:
             self.results_strip.set("hops", None)
             self.results_strip.set("noreply", None)
-        self.route_title.setText(f"ROUTE · {hop_count} HOPS" if hop_count else "ROUTE")
+        self.route_title.setText(f"ROUTE · {hop_count} HOP{'S' if hop_count != 1 else ''}" if hop_count else "ROUTE")
         if self.trace_error and not self.hops:
             self.route_note_text.setText(self.trace_error)
             self.route_note.setVisible(True)
@@ -619,8 +619,7 @@ class DiagnosePage(Page):
     def cleanup(self):
         self.stop()
         for thread in (self.ping_thread, self.trace_thread, self.resolve_thread):
-            if thread and thread.isRunning():
-                thread.wait(5000)
+            finish_thread(thread, 5000)
 
 
 def vbox_with(widget):

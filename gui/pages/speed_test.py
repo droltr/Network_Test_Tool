@@ -4,9 +4,9 @@ from datetime import datetime
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtWidgets import QWidget, QFrame, QHBoxLayout, QVBoxLayout, QStackedWidget
 
-from gui.pages.base import Page
+from gui.pages.base import Page, finish_thread
 from gui.recent import recent_store
-from gui.styles.modern_theme import Colors
+from gui.styles.modern_theme import Colors, fill_color
 from gui.pages.diagnose import PingThread
 from gui.widgets.charts import LatencyChart, SpeedGauge, ThroughputChart
 from gui.widgets.common import (Card, Label, EmptyPane, ErrorCard, StatStrip, section_label, button, hbox,
@@ -94,7 +94,7 @@ class StepCell(QFrame):
 class HeroCard(Card):
     def __init__(self, title, color, unit):
         super().__init__(margins=(18, 14, 18, 14))
-        self.setStyleSheet(f"QFrame[card=\"card\"] {{ border-top: 3px solid {color}; }}")
+        self.setStyleSheet(f"QFrame[card=\"card\"] {{ border-top: 3px solid {fill_color(color)}; }}")
         self.value = Label("—", 34, 400, Colors.TEXT_STRONG, mono=True)
         self.unit = Label(unit, 12.5, color=Colors.TEXT_MUTED)
         self.body.addLayout(hbox(section_label(title, color, 11), "stretch", self.value, self.unit, spacing=8))
@@ -522,7 +522,7 @@ class SpeedTestPage(Page):
     def cleanup(self):
         if self.ping_thread and self.ping_thread.isRunning():
             self.ping_thread.stop()
-            self.ping_thread.wait(5000)
+            finish_thread(self.ping_thread, 5000)
         if self.test_thread and self.test_thread.isRunning():
             self.test_thread.stop()
-            self.test_thread.wait(10000)
+            finish_thread(self.test_thread, 10000)

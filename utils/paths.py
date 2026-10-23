@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 
 
@@ -59,3 +60,20 @@ def decode_output(data):
         return data.decode('utf-8')
     except UnicodeDecodeError:
         return data.decode(console_encoding() or 'utf-8', errors='replace')
+
+
+# Keeps console tools (ping, tracert, netsh) from flashing a window in the windowed .exe
+NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if sys.platform.startswith('win') else 0
+
+
+def run_command(command, timeout=10, **kwargs):
+    """subprocess.run for system tools: captured output decoded with decode_output(), no console
+    window, the parse-friendly environment and a timeout. Raises like subprocess.run
+    (OSError, subprocess.TimeoutExpired)."""
+    kwargs.setdefault('capture_output', True)
+    kwargs.setdefault('env', command_env())
+    kwargs.setdefault('creationflags', NO_WINDOW)
+    result = subprocess.run(command, timeout=timeout, **kwargs)
+    if kwargs['capture_output']:
+        result.stdout, result.stderr = decode_output(result.stdout), decode_output(result.stderr)
+    return result
