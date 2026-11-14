@@ -5,7 +5,7 @@
 ![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)
 ![Release](https://img.shields.io/github/v/release/droltr/Network_Test_Tool)
 
-**Version:** 0.9.0
+**Version:** 0.9.1
 **GitHub:** [https://github.com/droltr/Network_Test_Tool](https://github.com/droltr/Network_Test_Tool)
 
 A modern, comprehensive network diagnostic and troubleshooting utility built with Python and PyQt5.
@@ -28,7 +28,7 @@ Linux x86_64 / macOS Apple silicon:
 curl -fsSL https://droltr.github.io/Network_Test_Tool/run.sh | sh
 ```
 
-The command downloads the latest release into a per-user cache (`%LOCALAPPDATA%\NetworkTestTool\bin` or `~/.cache/network-test-tool/bin`), checks its SHA-256 against the release's `SHA256SUMS.txt`, and starts it. It needs no administrator rights and changes nothing else on the system. Read [run.ps1](site/run.ps1) or [run.sh](site/run.sh) first if you like. Optional environment variables: `NTT_VERSION=v0.9.0` pins a release, `NTT_NO_LAUNCH=1` only downloads and verifies, and `NTT_SKIP_HASH=1` runs a release that has no `SHA256SUMS.txt` without verification (not recommended). Company security policies may block `irm | iex`; use the download link above instead.
+The command downloads the latest release into a per-user cache (`%LOCALAPPDATA%\NetworkTestTool\bin` or `~/.cache/network-test-tool/bin`), checks its SHA-256 against the release's `SHA256SUMS.txt`, and starts it. It needs no administrator rights and changes nothing else on the system. Read [run.ps1](site/run.ps1) or [run.sh](site/run.sh) first if you like. Optional environment variables: `NTT_VERSION=v0.9.1` pins a release, `NTT_NO_LAUNCH=1` only downloads and verifies, and `NTT_SKIP_HASH=1` runs a release that has no `SHA256SUMS.txt` without verification (not recommended). Company security policies may block `irm | iex`; use the download link above instead.
 
 ## 📸 Screenshots
 
