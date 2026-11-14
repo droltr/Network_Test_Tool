@@ -50,7 +50,7 @@ button such as Renew IP or Flush DNS, and those ask for your password first.
   there; tests keep running when you switch pages.
 - Results of Diagnose host, Port scanner, Speed test, iPerf3 and monitor sessions are kept
   under **Recent tests** on the Dashboard; **Open** shows them again.
-- **View → Theme** switches between the available themes (applied after a restart).
+- **View → Theme** lists **Follow system** (the default), One Dark, Bauhaus light and Bauhaus dark. Follow system starts the app with the operating system's light or dark setting, and with the dark theme if that setting cannot be read. A theme you choose is remembered and is used instead of the system setting. A change applies at once, without a restart; if a test or recording is running, the app asks first because switching stops it.
 - **Help → User guide** (F1) opens this guide inside the app.
 
 ## Download

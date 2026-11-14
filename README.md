@@ -49,7 +49,7 @@ The command downloads the latest release into a per-user cache (`%LOCALAPPDATA%\
 *   **Office apps (Microsoft 365, Teams, Zoom):** A quick check and a meeting recorder measure the Wi-Fi link, the router, the internet and every Microsoft 365, Teams and Zoom address, then say whether the problem is the Wi-Fi, the local network, the internet provider, the company network (VPN, proxy) or the service, with an estimated Teams call quality.
 *   **Reporting:** Generate text, JSON and CSV reports, plus self-contained HTML reports for game diagnoses, Office apps checks and Network health recording sessions.
 *   **Troubleshooter:** Automated network diagnostics to identify common connectivity issues.
-*   **Modern UI:** Clean, dark-themed interface designed for ease of use.
+*   **Modern UI:** Clean interface with light and dark themes that follow the system setting, designed for ease of use.
 
 ## 📚 Documentation
 

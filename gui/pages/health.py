@@ -19,7 +19,11 @@ from network import health
 from network.monitor import ConnectionMonitor, SessionRecorder, session_markdown, write_session_report_files
 from network.system_tools import SystemTools
 
-STATUS_COLORS = {"ok": Colors.GREEN, "info": Colors.BLUE, "warn": Colors.YELLOW, "fail": Colors.RED}
+def status_colors():
+    """Status token colours, resolved at call time so an in-process theme switch is honoured."""
+    return {"ok": Colors.GREEN, "info": Colors.BLUE, "warn": Colors.YELLOW, "fail": Colors.RED}
+
+
 STATUS_LABELS = {"ok": "OK", "info": "Info", "warn": "Check", "fail": "Problem"}
 TARGET_TITLES = {"gateway": "Gateway", "dns": "DNS", "internet": "Internet", "custom": "Custom host"}
 ACTION_LABELS = {"flush_dns": "Flush DNS", "renew_ip": "Renew IP"}
@@ -328,7 +332,7 @@ class HealthPage(Page):
     def result_row(self, result):
         card = Card(margins=(14, 10, 14, 10), spacing=4)
         status = result["status"]
-        color = STATUS_COLORS.get(status, Colors.TEXT_FAINT)
+        color = status_colors().get(status, Colors.TEXT_FAINT)
         if status == "pending":
             dot = StatusDot(Colors.TEXT_FAINT, 8, "dashed")
             badge = Label("", 11, 600, Colors.TEXT_MUTED)

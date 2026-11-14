@@ -42,7 +42,7 @@ router, the internet provider, the company network (VPN, proxy, firewall) or the
 
 ## Quick check
 
-About 10 seconds. Measures the Wi-Fi link, pings the router and the internet, looks up names, and tests
+About 10 to 30 seconds (longer when the router does not answer ping). Measures the Wi-Fi link, pings the router and the internet, looks up names, and tests
 every Microsoft 365, Teams and Zoom address once, including the UDP ports calls use. The result names the
 layer with the problem and says what to do.
 

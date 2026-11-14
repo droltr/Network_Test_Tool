@@ -18,6 +18,19 @@ class RecentStore(QObject):
             self.entries = json.loads(self.settings.value("recent_results", "[]", type=str))
         except (TypeError, ValueError):
             self.entries = []
+        # QSettings can contain records written by older versions or left
+        # incomplete by an interrupted write. Keep valid records so one bad
+        # entry cannot prevent the dashboard from opening.
+        entries = self.entries
+        if isinstance(entries, list):
+            self.entries = [entry for entry in entries
+                            if isinstance(entry, dict)
+                            and isinstance(entry.get('kind'), str)
+                            and entry['kind'].strip()]
+        else:
+            self.entries = []
+        if self.entries != entries:
+            self.settings.setValue("recent_results", json.dumps(self.entries))
 
     def add(self, kind, target, summary, data=None):
         """kind: 'diagnose', 'port', 'speed' or 'iperf'. Returns the stored entry."""
@@ -36,13 +49,14 @@ class RecentStore(QObject):
         return entry
 
     def items(self, kind=None):
-        return [e for e in self.entries if kind is None or e['kind'] == kind]
+        return [e for e in self.entries
+                if isinstance(e, dict) and e.get('kind') and (kind is None or e.get('kind') == kind)]
 
     def latest(self, kind):
         return next(iter(self.items(kind)), None)
 
     def get(self, entry_id):
-        return next((e for e in self.entries if e['id'] == entry_id), None)
+        return next((e for e in self.entries if isinstance(e, dict) and e.get('id') == entry_id), None)
 
 
 _store = None

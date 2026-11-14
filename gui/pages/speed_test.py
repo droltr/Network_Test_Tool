@@ -71,7 +71,8 @@ class StepCell(QFrame):
         layout.addWidget(self.value)
         self.set_state("pending")
 
-    def set_state(self, state, value=None, color=Colors.GREEN, percent=None):
+    def set_state(self, state, value=None, color=None, percent=None):
+        color = color or Colors.GREEN
         if state == "done":
             self.status.setText(f"✓ {self.title}")
             self.status.set_color(color)

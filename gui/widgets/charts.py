@@ -173,9 +173,9 @@ class Sparkline(QWidget):
 class ThroughputChart(QWidget):
     """Mbps over seconds for one phase; dotted reference line at half the scale."""
 
-    def __init__(self, color=Colors.BLUE, footer=True, parent=None):
+    def __init__(self, color=None, footer=True, parent=None):
         super().__init__(parent)
-        self.color = color
+        self.color = color or Colors.BLUE
         self.samples = []  # (seconds, mbps)
         self.footer = footer
         self.setMinimumHeight(140)

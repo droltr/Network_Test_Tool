@@ -33,6 +33,7 @@ import ipaddress
 import json
 import logging
 import os
+import queue
 import re
 import socket
 import ssl
@@ -44,7 +45,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future
 from datetime import datetime, timezone
 
 import psutil
@@ -54,6 +55,8 @@ from utils.paths import resource_path, state_dir
 M365_ENDPOINTS_URL = "https://endpoints.office.com/endpoints/worldwide?clientrequestid={guid}"
 M365_CACHE_NAME = "m365-endpoints.json"
 M365_CLIENT_ID_NAME = "m365-client-request-id.txt"
+M365_FAILURE_NAME = "m365-endpoints-failure.json"
+M365_RETRY_S = 3600
 M365_REFRESH_S = 24 * 3600          # Microsoft publishes changes monthly; once a day is plenty
 CHECK_KINDS = ("dns", "tcp", "tls", "https", "stun", "udp")
 TENANT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,62}$")
@@ -236,26 +239,95 @@ def proxy_settings():
 
 # ---------------------------------------------------------------------------- probes
 
+class _ProbePool:
+    """Fixed daemon workers so hung probes cannot hold up interpreter exit.
+
+    ThreadPoolExecutor joins its workers at interpreter exit even when shut down
+    with wait=False. Office workers must be safe to abandon after the exit deadline.
+    """
+
+    def __init__(self, workers, name="office-probe"):
+        self.jobs = queue.Queue()
+        self.threads = [threading.Thread(target=self._work, name=name, daemon=True) for _ in range(workers)]
+        for thread in self.threads:
+            thread.start()
+
+    def _work(self):
+        while (job := self.jobs.get()) is not None:
+            future, func, args = job
+            if future.set_running_or_notify_cancel():
+                try:
+                    future.set_result(func(*args))
+                except BaseException as error:
+                    future.set_exception(error)
+
+    def submit(self, func, *args):
+        future = Future()
+        self.jobs.put((future, func, args))
+        return future
+
+    def shutdown(self, wait=False, cancel_futures=True):
+        if cancel_futures:
+            while True:
+                try:
+                    self.jobs.get_nowait()[0].cancel()
+                except queue.Empty:
+                    break
+        for _ in self.threads:
+            self.jobs.put(None)
+        if wait:
+            for thread in self.threads:
+                thread.join()
+
+
+DNS_LOOKUP_LIMIT = 8
+_DNS_LOCK = threading.Lock()
+_DNS_LOOKUPS = {}                 # (host, port, family) -> running lookup, shared by callers
+
+
 def _resolve(host, port, timeout, family=socket.AF_UNSPEC, socktype=socket.SOCK_STREAM):
     """getaddrinfo with a time limit (it has none of its own): list of sockaddr tuples, IPv4 first.
     Raises OSError (socket.gaierror) or TimeoutError."""
-    box = {}
+    deadline = time.monotonic() + max(0.0, timeout)
+    key = (host, port, family)
+    while True:
+        with _DNS_LOCK:
+            # A stuck getaddrinfo keeps its slot even after its caller times out.
+            for old_key, old in list(_DNS_LOOKUPS.items()):
+                if not old["thread"].is_alive():
+                    del _DNS_LOOKUPS[old_key]
+            box = _DNS_LOOKUPS.get(key)
+            if box is None:
+                if len(_DNS_LOOKUPS) >= DNS_LOOKUP_LIMIT:
+                    raise TimeoutError("name lookup timed out: DNS worker limit reached")
+                box = {"done": threading.Event(), "socktype": socktype}
 
-    def worker():
-        try:
-            box["value"] = socket.getaddrinfo(host, port, family, socktype)
-        except Exception as e:  # noqa: BLE001 (re-raised in the caller's thread)
-            box["error"] = e
+                def worker(box=box):
+                    try:
+                        box["value"] = socket.getaddrinfo(host, port, family, socktype)
+                    except Exception as e:  # noqa: BLE001 (re-raised by each waiting caller)
+                        box["error"] = e
+                    finally:
+                        box["done"].set()
 
-    thread = threading.Thread(target=worker, name="office-dns", daemon=True)
-    thread.start()
-    thread.join(timeout)
-    if thread.is_alive():
-        raise TimeoutError(f"name lookup timed out after {timeout:g} s")
+                box["thread"] = threading.Thread(target=worker, name="office-dns", daemon=True)
+                _DNS_LOOKUPS[key] = box
+                try:
+                    box["thread"].start()
+                except BaseException:
+                    del _DNS_LOOKUPS[key]
+                    raise
+        if not box["done"].wait(max(0.0, deadline - time.monotonic())):
+            raise TimeoutError(f"name lookup timed out after {timeout:g} s")
+        if box["socktype"] == socktype:
+            break
+        # Different socket types share the slot, but need their own result.
+        box["thread"].join(max(0.0, deadline - time.monotonic()))
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"name lookup timed out after {timeout:g} s")
     if "error" in box:
         raise box["error"]
-    infos = box.get("value") or []
-    infos.sort(key=lambda info: 0 if info[0] == socket.AF_INET else 1)
+    infos = sorted(box.get("value") or [], key=lambda info: 0 if info[0] == socket.AF_INET else 1)
     seen, result = set(), []
     for family_, _type, _proto, _name, sockaddr in infos:
         if sockaddr[0] not in seen:
@@ -645,13 +717,30 @@ def _make_result(service, check, host, probe):
             "details": details}
 
 
-def run_checks(services, tenant=None, cancel=None, callback=None, workers=8):
+def _live_category(values, endpoint_sets, protocol=None, port=None):
+    """Highest Microsoft category of the host names / addresses in values, or None when none is listed."""
+    best = None
+    for value in values:
+        if not value:
+            continue
+        category = classify_endpoint(value, endpoint_sets, protocol, port)
+        if _CATEGORY_RANK.get(category, 0) > _CATEGORY_RANK.get(best, 0):
+            best = category
+    return best
+
+
+def run_checks(services, tenant=None, cancel=None, callback=None, workers=8, endpoint_sets=None):
     """Run every check of services (load_services() output) in a thread pool.
 
     Checks whose host needs {tenant} are left out when no valid tenant is given. Results come back
     in definition order; callback(result) is called from worker threads as each check finishes.
     Checks not started before cancel is set are returned with ok None and error 'cancelled'.
-    Optimize checks get details['route'] = route_interface(remote address)."""
+    Optimize checks get details['route'] = route_interface(remote address).
+
+    endpoint_sets: Microsoft's current endpoint list (fetch_m365_endpoints()['endpoint_sets']). When
+    given, the highest category it lists for a check's host or connected address replaces the
+    bundled 'optimize' flag (result['category'] and result['category_source'] = 'm365'); a check it
+    does not list keeps the bundled flag (category_source 'bundled')."""
     jobs = []
     for service in services or []:
         for check in service.get("checks", []):
@@ -668,10 +757,16 @@ def run_checks(services, tenant=None, cancel=None, callback=None, workers=8):
         else:
             probe = run_check(check, host)
             result = _make_result(service, check, host, probe)
-            if check.get("optimize") and probe.get("ok") is not None:
-                ip = _remote_ip(check["kind"], result["details"])
-                if ip:
-                    result["details"]["route"] = route_interface(ip)
+            ip = _remote_ip(check["kind"], result["details"])
+            if endpoint_sets:
+                protocol = "udp" if check["kind"] in ("stun", "udp") else "tcp"
+                category = _live_category((host, ip), endpoint_sets, protocol, check.get("port", 443))
+                result["category"] = category
+                result["category_source"] = "m365" if category else "bundled"
+                if category:
+                    result["optimize"] = category == "Optimize"
+            if result["optimize"] and probe.get("ok") is not None and ip:
+                result["details"]["route"] = route_interface(ip)
         if callback is not None:
             try:
                 callback(result)
@@ -679,9 +774,12 @@ def run_checks(services, tenant=None, cancel=None, callback=None, workers=8):
                 logging.debug(f"office check callback failed: {e}")
         return result
 
-    with ThreadPoolExecutor(max_workers=max(1, min(int(workers), len(jobs))),
-                            thread_name_prefix="office-check") as pool:
-        return list(pool.map(job, jobs))
+    pool = _ProbePool(max(1, min(int(workers), len(jobs))), name="office-check")
+    try:
+        futures = [pool.submit(job, item) for item in jobs]
+        return [future.result() for future in futures]
+    finally:
+        pool.shutdown(wait=False)
 
 
 # ---------------------------------------------------------------------------- M365 endpoint list
@@ -757,13 +855,31 @@ def fetch_m365_endpoints(timeout=10, force=False, now=None):
 
     A cache younger than a day is used without a download (unless force). Otherwise the web service
     is asked; when that fails the cache of any age is used, then the Optimize sets bundled in
-    office_services.json. Never raises."""
+    office_services.json. Failed downloads are retried after one hour unless force is set.
+    Never raises."""
     now = time.time() if now is None else now
     cached = _read_cache()
     if cached and not force and 0 <= now - cached[0] < M365_REFRESH_S:
         return {"source": "cache", "fetched": _iso(cached[0]), "endpoint_sets": cached[1], "error": None}
+    failure_path = os.path.join(state_dir(), M365_FAILURE_NAME)
+    try:
+        failure = _read_json(failure_path)
+        retry_later = 0 <= now - float(failure["failed"]) < M365_RETRY_S
+        error = failure["error"]
+        if not isinstance(error, str):
+            retry_later = False
+    except (OSError, ValueError, KeyError, TypeError):
+        retry_later = False
+    if retry_later and not force:
+        if cached:
+            return {"source": "cache", "fetched": _iso(cached[0]), "endpoint_sets": cached[1], "error": error}
+        return {"source": "bundled", "fetched": None, "endpoint_sets": _bundled_endpoints(), "error": error}
     try:
         sets = _download_endpoints(timeout)
+        try:
+            os.remove(failure_path)
+        except OSError:
+            pass
         try:
             with open(_m365_cache_path(), "w", encoding="utf-8") as f:
                 json.dump({"fetched": now, "endpoint_sets": sets}, f)
@@ -773,6 +889,11 @@ def fetch_m365_endpoints(timeout=10, force=False, now=None):
     except Exception as e:  # noqa: BLE001
         error = _error_text(getattr(e, "reason", None) or e)
         logging.info(f"Microsoft 365 endpoint list download failed: {error}")
+        try:
+            with open(failure_path, "w", encoding="utf-8") as f:
+                json.dump({"failed": now, "error": error}, f)
+        except OSError as save_error:
+            logging.debug(f"Cannot save the M365 download failure: {save_error}")
     if cached:
         return {"source": "cache", "fetched": _iso(cached[0]), "endpoint_sets": cached[1], "error": error}
     return {"source": "bundled", "fetched": None, "endpoint_sets": _bundled_endpoints(), "error": error}
@@ -790,15 +911,32 @@ def _host_matches(host, pattern):
     return host == pattern
 
 
-def classify_endpoint(value, endpoint_sets):
+def _port_matches(ports, port):
+    for part in str(ports or "").split(","):
+        try:
+            bounds = part.strip().split("-")
+            if len(bounds) == 1 and int(bounds[0]) == port:
+                return True
+            if len(bounds) == 2 and int(bounds[0]) <= port <= int(bounds[1]):
+                return True
+        except (ValueError, TypeError):
+            continue
+    return False
+
+
+def classify_endpoint(value, endpoint_sets, protocol=None, port=None):
     """Highest Microsoft category ('Optimize' > 'Allow' > 'Default') of a host name or IP address in
-    the endpoint sets, or None when it is not listed (Microsoft: follow the highest category)."""
+    the endpoint sets, or None when it is not listed (Microsoft: follow the highest category).
+    When protocol and port are supplied, only sets listing that transport and port count."""
     best = None
     try:
         address = ipaddress.ip_address(value)
     except ValueError:
         address = None
     for item in endpoint_sets or []:
+        if protocol is not None and port is not None:
+            if protocol not in ("tcp", "udp") or not _port_matches(item.get(protocol + "Ports"), port):
+                continue
         if address is not None:
             hit = False
             for network in item.get("ips", []):

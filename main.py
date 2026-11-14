@@ -28,16 +28,17 @@ def main():
         app.setDesktopFileName("network-test-tool")
 
         from PyQt5.QtCore import QSettings
-        from gui.styles.modern_theme import apply_theme, load_fonts, ui_font, DEFAULT_THEME
-        # The theme must be active before any widget is built; NTT_THEME overrides it for testing
-        theme = os.environ.get("NTT_THEME") or QSettings("NetworkTools", "NetworkTestTool").value(
-            "theme", DEFAULT_THEME, type=str)
-        apply_theme(theme)
+        from gui.styles.modern_theme import apply_theme, load_fonts, ui_font, resolve_theme, SYSTEM_CHOICE
+        # The theme must be active before any widget is built; NTT_THEME overrides it for testing.
+        # No saved choice means "Follow system" (dark when the system setting cannot be read).
+        choice = os.environ.get("NTT_THEME") or QSettings("NetworkTools", "NetworkTestTool").value(
+            "theme", SYSTEM_CHOICE, type=str)
+        apply_theme(resolve_theme(choice))
         load_fonts()
         app.setFont(ui_font(12.5))
 
         from gui.main_window import MainWindow
-        window = MainWindow()
+        window = MainWindow(choice)
         window.show()
         sys.exit(app.exec_())
     except Exception as e:

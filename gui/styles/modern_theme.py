@@ -17,12 +17,23 @@ THEMES = {
     "bauhaus-dark": "Bauhaus dark",
 }
 DEFAULT_THEME = "bauhaus-light"
+# Saved choice that follows the operating system's light/dark setting (the default choice)
+SYSTEM_CHOICE = "system"
+
+
+def resolve_theme(saved=None):
+    """Theme key for a saved choice: an explicit theme wins; "system", None or an unknown
+    value follow the OS setting, and an unreadable setting means dark."""
+    if saved in THEMES:
+        return saved
+    from utils.system_theme import system_prefers_dark
+    return "bauhaus-light" if system_prefers_dark() is False else "bauhaus-dark"
 
 _PALETTES = {
     "onedark": dict(
         CHROME="#1b1e24", BG_SUNKEN="#21252b", BG="#282c34", SURFACE="#2c313a", SURFACE_2="#323842",
         BORDER="#4b5263", ROW_DIVIDER="#2c313a",
-        TEXT="#abb2bf", TEXT_STRONG="#dcdfe4", TEXT_MUTED="#9aa1ad", TEXT_FAINT="#5c6370",
+        TEXT="#abb2bf", TEXT_STRONG="#dcdfe4", TEXT_MUTED="#9aa1ad", TEXT_FAINT="#9ba2ad",
         BLUE="#61afef", BLUE_HOVER="#528bcc", BLUE_PRESSED="#4078b3",
         GREEN="#98c379", YELLOW="#e5c07b", YELLOW_FILL="#e5c07b", RED="#e57b84", PURPLE="#c678dd",
         PRIMARY="#61afef", PRIMARY_HOVER="#528bcc", PRIMARY_PRESSED="#4078b3", ON_PRIMARY="#1b1e24",
@@ -35,7 +46,7 @@ _PALETTES = {
     "bauhaus-light": dict(
         CHROME="#141414", BG_SUNKEN="#E7E0D2", BG="#F1ECE2", SURFACE="#F8F4EC", SURFACE_2="#E4DCCB",
         BORDER="#141414", ROW_DIVIDER="#D9D0BE",
-        TEXT="#1E1C19", TEXT_STRONG="#141414", TEXT_MUTED="#4A463F", TEXT_FAINT="#6E685D",
+        TEXT="#1E1C19", TEXT_STRONG="#141414", TEXT_MUTED="#4A463F", TEXT_FAINT="#666056",
         BLUE="#1D4E9E", BLUE_HOVER="#173F80", BLUE_PRESSED="#123266",
         # YELLOW is dark enough for text on the cream background; shapes and bars use the brighter YELLOW_FILL
         GREEN="#1D4E9E", YELLOW="#855F00", YELLOW_FILL="#E5A800", RED="#C8322A", PURPLE="#141414",
@@ -49,7 +60,7 @@ _PALETTES = {
     "bauhaus-dark": dict(
         CHROME="#0B0B0B", BG_SUNKEN="#101010", BG="#1A1A1A", SURFACE="#222222", SURFACE_2="#2E2E2E",
         BORDER="#5A564E", ROW_DIVIDER="#2E2E2E",
-        TEXT="#E4DCCB", TEXT_STRONG="#F1ECE2", TEXT_MUTED="#B9B2A5", TEXT_FAINT="#8F887B",
+        TEXT="#E4DCCB", TEXT_STRONG="#F1ECE2", TEXT_MUTED="#B9B2A5", TEXT_FAINT="#9b9589",
         BLUE="#6F9BE8", BLUE_HOVER="#8AB0F0", BLUE_PRESSED="#5A86D4",
         GREEN="#6F9BE8", YELLOW="#F2B705", YELLOW_FILL="#F2B705", RED="#F0584D", PURPLE="#F1ECE2",
         PRIMARY="#F1ECE2", PRIMARY_HOVER="#FFFFFF", PRIMARY_PRESSED="#D9D0BE", ON_PRIMARY="#141414",

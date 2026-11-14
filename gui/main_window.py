@@ -1,7 +1,4 @@
-import os
-import sys
-
-from PyQt5.QtCore import QProcess, QSettings
+from PyQt5.QtCore import QSettings
 from PyQt5.QtGui import QIcon, QPixmap
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QStackedWidget, QMessageBox, QAction,
                              QActionGroup, QApplication)
@@ -16,12 +13,24 @@ from .pages.game import GamePage
 from .pages.office import OfficePage
 from .pages.health import HealthPage
 from .pages.troubleshooter import TroubleshooterPage
-from .styles.modern_theme import ModernTheme, Theme, THEMES
+from .styles.modern_theme import (ModernTheme, THEMES, SYSTEM_CHOICE, apply_theme, load_fonts, ui_font,
+                                  resolve_theme)
 from .widgets.sidebar import Sidebar, AppMark
 
+def _settings():
+    return QSettings("NetworkTools", "NetworkTestTool")
+
+
 class MainWindow(QMainWindow):
-    def __init__(self):
+    # The window that is currently shown; switching the theme replaces it in the same process
+    current = None
+
+    def __init__(self, theme_choice=None):
+        """theme_choice is the saved choice ("system" or a theme key); None reads the saved setting."""
         super().__init__()
+        if theme_choice is None:
+            theme_choice = _settings().value("theme", SYSTEM_CHOICE, type=str)
+        self.theme_choice = theme_choice if theme_choice in THEMES else SYSTEM_CHOICE
         self.setWindowTitle("Network Test Tool")
         self.resize(1280, 800)
         self.setMinimumSize(1200, 760)
@@ -30,6 +39,7 @@ class MainWindow(QMainWindow):
         self.setup_ui()
         self.apply_theme()
         self.show_page("dashboard")
+        MainWindow.current = self
 
     def setup_ui(self):
         root = QWidget()
@@ -112,16 +122,19 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        # View menu: theme choice, applied on the next start
+        # View menu: theme choice, applied at once (the window is rebuilt in this process)
         view_menu = menu_bar.addMenu("View")
         theme_menu = view_menu.addMenu("Theme")
         group = QActionGroup(self)
-        for key, title in THEMES.items():
+        self.theme_actions = {}
+        choices = {SYSTEM_CHOICE: "Follow system", **THEMES}
+        for key, title in choices.items():
             action = QAction(title, self, checkable=True)
-            action.setChecked(key == Theme.NAME)
+            action.setChecked(key == self.theme_choice)
             action.triggered.connect(lambda _=False, k=key: self.choose_theme(k))
             group.addAction(action)
             theme_menu.addAction(action)
+            self.theme_actions[key] = action
 
         # Help menu
         help_menu = menu_bar.addMenu("Help")
@@ -148,22 +161,50 @@ class MainWindow(QMainWindow):
             icon.addPixmap(pixmap)
         return icon
 
-    def choose_theme(self, key):
-        if key == Theme.NAME:
+    def busy_pages(self):
+        """Titles of the pages that have work running (a test, a recording, a server)."""
+        return [key for key, page in self.pages.items() if page.running]
+
+    def choose_theme(self, choice):
+        if choice == self.theme_choice:
             return
-        QSettings("NetworkTools", "NetworkTestTool").setValue("theme", key)
-        answer = QMessageBox.question(self, "Theme", f"{THEMES[key]} is used from the next start. Restart now?")
-        if answer == QMessageBox.Yes:
+        if self.busy_pages():
+            answer = QMessageBox.question(
+                self, "Theme", "A test is running. Switching the theme stops it. Switch now?")
+            if answer != QMessageBox.Yes:
+                self.theme_actions[self.theme_choice].setChecked(True)
+                return
+        _settings().setValue("theme", choice)
+        self.switch_theme(choice)
+
+    def switch_theme(self, choice):
+        """Replace this window with a new one in the new theme, in the same process.
+
+        Widgets read the colour tokens when they are built, so the window cannot be restyled
+        in place. The old window is closed first (its pages stop their threads and timers),
+        then the tokens change and a new window takes over its geometry and page.
+        """
+        app = QApplication.instance()
+        geometry = self.saveGeometry()
+        state = self.saveState()
+        page_key = next((k for k, p in self.pages.items() if p is self.stack.currentWidget()), "dashboard")
+        quit_on_close = app.quitOnLastWindowClosed()
+        app.setQuitOnLastWindowClosed(False)   # closing the old window must not end the app
+        try:
             self.close()
-            if getattr(sys, "frozen", False):
-                # One-file build: without this the new process reuses our _MEI temp dir,
-                # which is deleted when we exit (FileNotFoundError: base_library.zip)
-                os.environ["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
-                args = sys.argv[1:]     # argv[0] is the exe itself
-            else:
-                args = sys.argv
-            QProcess.startDetached(sys.executable, args)
-            QApplication.instance().quit()
+            apply_theme(resolve_theme(choice))
+            load_fonts()
+            app.setFont(ui_font(12.5))
+            window = MainWindow(choice)
+            window.restoreGeometry(geometry)
+            window.restoreState(state)
+            window.show_page(page_key)
+            MainWindow.current = window
+            window.show()
+        finally:
+            app.setQuitOnLastWindowClosed(quit_on_close)
+        self.deleteLater()
+        return window
 
     def show_help(self, topic):
         from .dialogs.help import HelpDialog

@@ -7,6 +7,10 @@ company network (VPN, proxy, firewall), the service itself, or this computer.
 
 Snapshot (the single input to diagnose() and localize()):
 
+Recordings can also supply 'assessment', the same metrics using only measurements
+outside gateway-change windows, and 'network_change', counts for an informational
+finding. Top-level metrics retain all collected evidence for charts and reports.
+
     {
         "time": datetime,                         # when the snapshot was taken
         "connection": "wifi" | "ethernet" | "unknown",
@@ -642,6 +646,28 @@ def _merge_health(findings, health):
 
 # ---------------------------------------------------------------------------- diagnosis
 
+NETWORK_CHANGE_BEFORE_S = 10
+NETWORK_CHANGE_AFTER_S = 20
+
+
+def during_network_change(when, events, ended=None):
+    """Whether a sample or a whole service pass overlaps a gateway-change window."""
+    start = _as_datetime(when)
+    end = _as_datetime(ended) or start
+    if start is None:
+        return False
+    for event in events or []:
+        change = _as_datetime(event.get("time")) if event.get("kind") == "gateway_change" else None
+        if change is not None and (start - change).total_seconds() <= NETWORK_CHANGE_AFTER_S \
+                and (end - change).total_seconds() >= -NETWORK_CHANGE_BEFORE_S:
+            return True
+    return False
+
+
+def _assessment(snapshot):
+    return {**snapshot, **(snapshot.get("assessment") or {})}
+
+
 def _connection(snapshot):
     connection = snapshot.get("connection") or "unknown"
     wifi = snapshot.get("wifi")
@@ -652,8 +678,15 @@ def _connection(snapshot):
 
 def diagnose(snapshot):
     """Findings for a snapshot (see the module docstring), ordered by layer and severity."""
-    snapshot = snapshot or {}
+    snapshot = _assessment(snapshot or {})
     findings = []
+    change = snapshot.get("network_change")
+    if change:
+        findings.append(_finding("network_change", "local", "info", "Measurements affected by a network change",
+                                 f"{change['lost_probes']} lost probes and {change['failed_checks']} failed service checks "
+                                 "coincided with a default gateway change (for example connecting a VPN). "
+                                 "Measurements from 10 seconds before to 20 seconds after each change are shown "
+                                 "in the report but excluded from the problem verdict.", change["evidence"]))
     connection = _connection(snapshot)
     wifi = snapshot.get("wifi") if connection == "wifi" else None
     blocked = bool(wifi) and wifi.get("reason") == "location_permission"
@@ -804,7 +837,7 @@ def localize(snapshot, findings=None):
     service -> device), considering 'fail' findings before 'warn' ones. Returns layer 'none' when
     everything measured is fine and 'inconclusive' when nothing useful was measured.
     """
-    snapshot = snapshot or {}
+    snapshot = _assessment(snapshot or {})
     if findings is None:
         findings = diagnose(snapshot)
     problems = [f for f in findings if f.get("severity") in ("warn", "fail")]
@@ -815,7 +848,8 @@ def localize(snapshot, findings=None):
                             f"{MIN_PROBES} probes) and make sure the gateway, internet and service checks ran.",
                     "tone": "neutral", "finding_ids": []}
         return {"layer": "none", "headline": LAYER_LABELS["none"],
-                "text": "The Wi-Fi, local network, internet and tested services look healthy.",
+                "text": ("Measurements outside network changes look healthy." if snapshot.get("network_change")
+                         else "The Wi-Fi, local network, internet and tested services look healthy."),
                 "tone": "good", "finding_ids": []}
     worst = "fail" if any(f["severity"] == "fail" for f in problems) else "warn"
     order = {layer: i for i, layer in enumerate(LAYERS)}

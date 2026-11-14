@@ -30,8 +30,8 @@ import sys
 import threading
 import time
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor, wait
-from datetime import datetime
+from concurrent.futures import wait
+from datetime import datetime, timedelta
 
 from network import office_quality as oq
 from network import office_services as svc
@@ -47,6 +47,8 @@ MAX_EVENTS = 5000
 MAX_WIFI_EVENTS = 5000
 MAX_DNS_RESULTS = 2000
 CHECK_JOIN_S = 5.0
+STOP_JOIN_S = 7.0                # shared join budget; leave time to write the exit report
+GATEWAY_POLL_S = 5.0
 FAIL_THRESHOLD = 2               # consecutive lost probes that make an outage (like SessionRecorder)
 MIN_SESSION_INTERVAL = 1.0       # at most one probe per second per target
 MIN_QUICK_INTERVAL = 0.5
@@ -291,13 +293,41 @@ def _diagnose(snapshot, errors):
                     "text": "The diagnosis could not run.", "tone": "neutral", "finding_ids": []}
 
 
+# ---------------------------------------------------------------------------- Microsoft 365 address list
+
+M365_FETCH_TIMEOUT_S = 5
+
+
+def _m365_list(cancel=None):
+    """(info, endpoint_sets): Microsoft's current endpoint list for the service checks. info is
+    {'source', 'fetched', 'error'} (None when cancelled or unexpectedly broken). endpoint_sets is None
+    when only the bundled list is available, so the bundled categories stay. Never raises; call it from
+    a worker thread (it may download for up to M365_FETCH_TIMEOUT_S)."""
+    if _cancelled(cancel):
+        return None, None
+    try:
+        result = svc.fetch_m365_endpoints(timeout=M365_FETCH_TIMEOUT_S)
+        info = {"source": result.get("source"), "fetched": result.get("fetched"), "error": result.get("error")}
+        sets = result.get("endpoint_sets") if info["source"] in ("web", "cache") else None
+        return info, sets or None
+    except Exception as e:  # noqa: BLE001
+        logging.debug(f"Microsoft 365 endpoint list unavailable: {e}")
+        return None, None
+
+
+def _quick_services(services, tenant, cancel, holder):
+    """The quick test's service part: fetch the address list, then run the checks with it."""
+    holder["info"], sets = _m365_list(cancel)
+    return svc.run_checks(services, tenant, cancel, endpoint_sets=sets)
+
+
 # ---------------------------------------------------------------------------- quick test
 
 def quick_test(tenant=None, probes=20, interval=0.5, cancel=None, progress=None, services=None):
     """Run every check once and return the report dict (kind 'quick'); see the module docstring.
 
     probes and interval set the ping and STUN series (default 20 probes, one every 0.5 s, so
-    about 10 s). Independent parts run in parallel. progress(stage, percent) is called from worker
+    about 10 s; up to about 30 s when a target never answers, because each ping then waits for its 1 s timeout). Independent parts run in parallel. progress(stage, percent) is called from worker
     threads. cancel: threading.Event or callable; on cancel the parts still running are abandoned
     and the report holds what finished ('cancelled': True). services: load_services() output
     (default: the bundled list). Never raises."""
@@ -320,13 +350,14 @@ def quick_test(tenant=None, probes=20, interval=0.5, cancel=None, progress=None,
     servers = dns_servers()
     server = servers[0] if servers else None
 
+    m365 = {}
     parts = {}
     if gateway:
         parts["gateway"] = ("Pinging the router", icmp_series, (gateway, count, interval, cancel))
     parts["internet"] = ("Pinging the internet", _internet_series, (count, interval, cancel))
     parts["dns"] = ("Timing name lookups", dns_timing, (DNS_TEST_HOST, server))
     parts["health"] = ("Running the network health scan", _health_scan, ())
-    parts["services"] = ("Checking Microsoft 365, Teams and Zoom", svc.run_checks, (services, tenant, cancel))
+    parts["services"] = ("Checking Microsoft 365, Teams and Zoom", _quick_services, (services, tenant, cancel, m365))
     parts["proxy"] = ("Reading the proxy settings", svc.proxy_settings, ())
     for sid, target in media.items():
         parts[f"media:{sid}"] = (f"Probing the {oq.SERVICE_LABELS.get(sid, sid)} media relay", media_series,
@@ -349,7 +380,7 @@ def quick_test(tenant=None, probes=20, interval=0.5, cancel=None, progress=None,
 
     results = {}
     cancelled = False
-    pool = ThreadPoolExecutor(max_workers=len(parts), thread_name_prefix="office-quick")
+    pool = svc._ProbePool(len(parts), name="office-quick")
     try:
         futures = {pool.submit(run, name, *spec): name for name, spec in parts.items()}
         pending = set(futures)
@@ -376,7 +407,8 @@ def quick_test(tenant=None, probes=20, interval=0.5, cancel=None, progress=None,
                 "media": {sid: results[f"media:{sid}"] for sid in media if results.get(f"media:{sid}")},
                 "health": results.get("health"), "targets": service_targets(services),
                 "gateway_address": gateway, "internet_host": (internet or {}).get("address"),
-                "dns_server": server, "route": route, "proxy": results.get("proxy"), "nearby": nearby}
+                "dns_server": server, "route": route, "proxy": results.get("proxy"), "nearby": nearby,
+                "m365_endpoints": m365.get("info")}
     findings, verdict = _diagnose(snapshot, final_errors)
     _notify(progress, "Done", 100)
     return {"kind": "quick", "started": started, "ended": datetime.now(), "label": "", "tenant": tenant,
@@ -434,9 +466,13 @@ class OfficeSession:
         self.congestion = None
         self.nearby = []
         self.health = None
+        self._health_period = None
         self.proxy = None
         self.dns_results = []
         self.check_passes = 0
+        self.m365_endpoints = None      # {'source', 'fetched', 'error'} of the address list (first pass)
+        self._m365_sets = None
+        self._m365_done = False
         self.log_path = None
         self.events_log_path = None
         self.tracker = wifi_mod.WifiTracker()
@@ -449,9 +485,11 @@ class OfficeSession:
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._stop_lock = threading.RLock()     # serialises stop(); never held by probe threads
+        self._gateway_lock = threading.Lock()  # serialises reads in the two worker threads
         self._thread = None
         self._check_thread = None
         self._next_check = None
+        self._next_gateway_poll = None
         self._sample_file = self._sample_writer = None
         self._event_file = self._event_writer = None
         self._sample_columns = []
@@ -472,23 +510,31 @@ class OfficeSession:
         if self._report is not None and not self.is_running():
             return self._report
         self._stop.set()                     # at once, before waiting for another stop() call
-        with self._stop_lock:
+        deadline = time.monotonic() + STOP_JOIN_S
+        if not self._stop_lock.acquire(timeout=STOP_JOIN_S):
+            raise TimeoutError("Office recording stop is still running after the shutdown deadline")
+        try:
             if self._report is not None and not self.is_running():
                 return self._report          # another caller finished while we waited
             try:
                 current = threading.current_thread()
                 thread = self._thread
                 if thread is not None and thread is not current:
-                    thread.join(timeout=max(5.0, self.interval + 3.0))
+                    thread.join(timeout=max(0.0, min(CHECK_JOIN_S, deadline - time.monotonic())))
                 check = self._check_thread
                 if check is not None and check is not current:
-                    check.join(timeout=CHECK_JOIN_S)
+                    check.join(timeout=max(0.0, deadline - time.monotonic()))
+                if any(t is not None and t is not current and t.is_alive() for t in (thread, check)):
+                    self.errors.append("A recording worker did not stop in time; the report contains collected data.")
+                    logging.warning(self.errors[-1])
                 self._finish(datetime.now())     # closes the logs
                 self._report = self.report()
             except BaseException:
                 self._finish_quietly()
                 raise
             return self._report
+        finally:
+            self._stop_lock.release()
 
     def _finish_quietly(self):
         """Make sure the logs are closed even when stop() failed half way."""
@@ -511,14 +557,23 @@ class OfficeSession:
         pool = None
         try:
             self._prepare(self.started)
-            pool = ThreadPoolExecutor(max_workers=3 + len(self.media), thread_name_prefix="office-probe")
+            if self._stop.is_set():
+                return
+            pool = svc._ProbePool(3 + len(self.media))
             while not self._stop.is_set():
                 tick = time.monotonic()
                 now = datetime.now()
+                self._poll_gateway(now)
                 if self._next_check is None or now >= self._next_check:
                     self._start_service_pass(now)
                 self._tick(now, pool)
-                self._stop.wait(max(0.0, self.interval - (time.monotonic() - tick)))
+                deadline = tick + self.interval
+                while not self._stop.is_set():
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    self._stop.wait(min(remaining, max(0.0, self._next_gateway_poll - time.monotonic())))
+                    self._poll_gateway(datetime.now())
         except Exception as e:  # noqa: BLE001 (the recording ends but the report still works)
             logging.exception("office session loop failed")
             self.errors.append(f"Recording stopped by an error: {e}")
@@ -535,6 +590,7 @@ class OfficeSession:
         self.connection = detect_connection(status, self.route)
         self.wifi = status
         self.gateway = default_gateway()
+        self._next_gateway_poll = time.monotonic() + GATEWAY_POLL_S
         if not self.gateway:
             self.errors.append("No default gateway found; the router is not probed.")
         servers = dns_servers()
@@ -545,7 +601,9 @@ class OfficeSession:
             address = (lookup.get("addresses") or [None])[0] if lookup.get("ok") else None
             # Probe one resolved relay address for the whole session: stable path, no lookup per probe
             self.media[sid] = {**target, "address": address or target["host"]}
-        self._open_logs(now)
+        with self._lock:
+            if not self._stop.is_set():
+                self._open_logs(now)
 
     def _start_service_pass(self, now):
         self._next_check = datetime.fromtimestamp(now.timestamp() + self.service_check_every)
@@ -582,6 +640,7 @@ class OfficeSession:
             pending = set(futures.values())
             while pending and not self._stop.is_set():
                 _done, pending = wait(pending, timeout=STOP_POLL)
+                self._poll_gateway(datetime.now())
             if self._stop.is_set():
                 return None          # an interrupted round is not recorded
             for name, future in futures.items():
@@ -604,6 +663,8 @@ class OfficeSession:
                   "rx_rate_mbps": status.get("rx_rate_mbps"), "skipped": list(skipped),
                   "gateway_address": self.gateway}
         with self._lock:
+            if self.ended is not None and self._stop.is_set():
+                return None          # a late probe must not change a finalized recording
             # Tag the sample with the gateway that was really probed. A reply from a gateway that is no
             # longer the default one (changed while the round was in flight) must not count for the new one.
             outage_view = sample
@@ -705,19 +766,45 @@ class OfficeSession:
             logging.debug(f"office session callback failed: {e}")
 
     # ---------------------------------------------------------------- service checks
+    def _poll_gateway(self, now):
+        tick = time.monotonic()
+        if not self._stop.is_set() and (self._next_gateway_poll is None or tick >= self._next_gateway_poll):
+            self._next_gateway_poll = tick + GATEWAY_POLL_S
+            self._refresh_gateway(now)
+
+    def _refresh_gateway(self, now):
+        """Read the gateway in a worker; apply each change once under the recording lock."""
+        with self._gateway_lock:
+            gateway = default_gateway()
+            with self._lock:
+                if self._stop.is_set() or not gateway or gateway == self.gateway:
+                    return
+                if self.gateway:
+                    self._event(now, "gateway_change", f"Default gateway changed from {self.gateway} to {gateway}",
+                                "local", {"old": self.gateway, "new": gateway})
+                    self._close_gateway_outage(now)
+                self.gateway = gateway
+                self._gw_answered = False
+
     def _service_pass(self, now=None):
         """Run the service checks, DNS timing and (first pass only) the health scan and proxy settings;
         failures and recoveries become events. Runs in its own thread; tests call it directly."""
         now = now or datetime.now()
+        started = time.monotonic()
         errors = []
+        if not self._m365_done and not self._stop.is_set():
+            info, sets = _m365_list(self._stop)
+            if info is not None:
+                self.m365_endpoints, self._m365_sets, self._m365_done = info, sets, True
         results = _safe(errors, "Service checks", svc.run_checks, self.services, self.tenant, self._stop,
-                        default=[]) or []
+                        endpoint_sets=self._m365_sets, default=[]) or []
         dns = _safe(errors, "DNS timing", dns_timing, DNS_TEST_HOST, self.dns_server)
         first = self.check_passes == 0
         health = _safe(errors, "Health scan", _health_scan) if first else None
         proxy = _safe(errors, "Proxy settings", svc.proxy_settings) if first else None
         wifi = _safe(errors, "Wi-Fi status", read_wifi, default=None)
-        gateway = default_gateway()
+        ended = now + timedelta(seconds=max(0.0, time.monotonic() - started))
+        self._refresh_gateway(ended)         # fallback; the probe loop normally notices first
         if self._stop.is_set():
             return              # results that arrive after stop() are not part of the report
         with self._lock:
@@ -727,16 +814,11 @@ class OfficeSession:
             self.check_passes += 1
             if first:
                 self.health, self.proxy = health, proxy
+                self._health_period = (now, ended)
             if wifi and wifi[0].get("connected"):
                 self.nearby, self.congestion = wifi[1], wifi[2]
-            if gateway and gateway != self.gateway:
-                if self.gateway:
-                    self._event(now, "gateway_change", f"Default gateway changed from {self.gateway} to {gateway}",
-                                "local", {"old": self.gateway, "new": gateway})
-                    self._close_gateway_outage(now)
-                self.gateway = gateway
-                self._gw_answered = False
             if dns:
+                dns = dict(dns, time=now, ended=ended)
                 previous = self.dns_results[-1] if self.dns_results else None
                 self.dns_results.append(dns)
                 if len(self.dns_results) > MAX_DNS_RESULTS:
@@ -748,13 +830,16 @@ class OfficeSession:
                     self._event(now, "dns_restored", "Name lookups work again", "local", {})
             internet_down = "internet" in self._open
             for result in results:
-                self._merge_check(now, result, internet_down)
+                self._merge_check(now, result, internet_down, ended=ended)
 
-    def _merge_check(self, now, result, internet_down):
+    def _merge_check(self, now, result, internet_down, ended=None):
         if result.get("ok") is None:
             return              # untested or cancelled
         key = (result.get("service_id"), result.get("check_id"))
-        state = self._checks.setdefault(key, {"last": None, "failure": None, "failed": 0, "runs": 0})
+        result = dict(result, time=now, ended=ended or now)
+        state = self._checks.setdefault(key, {"last": None, "failure": None, "failed": 0, "runs": 0,
+                                              "history": deque(maxlen=MAX_DNS_RESULTS)})
+        state["history"].append(result)
         previous = state["last"]
         state["runs"] += 1
         state["last"] = result
@@ -789,10 +874,18 @@ class OfficeSession:
             self._open = {}
             self._close_logs()
 
-    def _merged_checks(self):
+    def _merged_checks(self, changes=None):
         """One result per check: the last failure (with a count) when it ever failed, else the last."""
         merged = []
         for state in self._checks.values():
+            if changes is not None:
+                history = [c for c in state["history"]
+                           if not oq.during_network_change(c["time"], changes, c["ended"])]
+                if not history:
+                    continue
+                failed = [c for c in history if c.get("ok") is False]
+                state = {"last": history[-1], "failure": failed[-1] if failed else None,
+                         "runs": len(history), "failed": len(failed)}
             if state["failed"]:
                 result = {**state["failure"], "details": dict(state["failure"].get("details") or {})}
                 if state["runs"] > 1:
@@ -804,14 +897,16 @@ class OfficeSession:
                 merged.append({**state["last"], "runs": state["runs"], "failed_runs": 0})
         return merged
 
-    def _worst_dns(self):
-        if not self.dns_results:
+    def _worst_dns(self, changes=None):
+        results = [d for d in self.dns_results if changes is None or not oq.during_network_change(
+            d.get("time"), changes, d.get("ended"))]
+        if not results:
             return None
-        failed = [d for d in self.dns_results if d.get("ok") is False]
+        failed = [d for d in results if d.get("ok") is False]
         if failed:
             return failed[-1]
-        timed = [d for d in self.dns_results if d.get("ms") is not None]
-        return max(timed, key=lambda d: d["ms"]) if timed else self.dns_results[-1]
+        timed = [d for d in results if d.get("ms") is not None]
+        return max(timed, key=lambda d: d["ms"]) if timed else results[-1]
 
     def snapshot(self, samples=None):
         """The office_quality snapshot of the recorded window."""
@@ -824,10 +919,10 @@ class OfficeSession:
                 if address and address not in addresses and "gateway" not in s.get("skipped", ()):
                     addresses.append(address)
 
-            def series(key, address=None):
+            def series(key, address=None, data=None):
                 # Router figures cover the current gateway only: probes sent to an earlier gateway
                 # (before a gateway change) are not mixed into the statistic.
-                values = [s[key] for s in samples if key not in s.get("skipped", ())
+                values = [s[key] for s in (samples if data is None else data) if key not in s.get("skipped", ())
                           and (key != "gateway" or s.get("gateway_address") in (None, address))]
                 if not values:
                     return None
@@ -835,20 +930,42 @@ class OfficeSession:
                 result["address"] = address
                 return result
 
-            media = {}
-            for sid, target in self.media.items():
-                values = [s["media"].get(sid) for s in samples if sid in s.get("media", {})]
-                if values:
-                    media[sid] = {**oq.series_from_rtts(values), "address": target["address"], "port": target["port"]}
+            def media_series(data):
+                media = {}
+                for sid, target in self.media.items():
+                    values = [s["media"].get(sid) for s in data if sid in s.get("media", {})]
+                    if values:
+                        media[sid] = {**oq.series_from_rtts(values), "address": target["address"], "port": target["port"]}
+                return media
+
+            change_data = {}
+            changes = [e for e in self.events if e["kind"] == "gateway_change"]
+            if changes:
+                affected = [s for s in samples if oq.during_network_change(s["time"], changes)]
+                stable = [s for s in samples if not oq.during_network_change(s["time"], changes)]
+                lost = sum(sum(s.get(k) is None for k in ("gateway", "internet") if k not in s.get("skipped", ()))
+                           + sum(v is None for v in s.get("media", {}).values()) for s in affected)
+                failed = sum(c.get("ok") is False and oq.during_network_change(c["time"], changes, c["ended"])
+                             for state in self._checks.values() for c in state["history"])
+                change_data = {"network_change": {"lost_probes": lost, "failed_checks": failed,
+                               "evidence": [f"{e['time'].isoformat(timespec='seconds')}: {e['text']}" for e in changes]},
+                               "assessment": {"gateway": series("gateway", self.gateway, stable),
+                                              "internet": series("internet", self.internet_host, stable),
+                                              "media": media_series(stable), "services": self._merged_checks(changes),
+                                              "dns": self._worst_dns(changes),
+                                              "health": (None if self._health_period and oq.during_network_change(
+                                                  self._health_period[0], changes, self._health_period[1])
+                                                  else self.health)}}
             wifi_status = self.wifi
             return {"time": self.started or datetime.now(), "connection": self.connection, "wifi": wifi_status,
                     "congestion": self.congestion, "wifi_events": list(self.wifi_events),
                     "gateway": series("gateway", self.gateway), "dns": self._worst_dns(),
                     "internet": series("internet", self.internet_host), "services": self._merged_checks(),
-                    "media": media, "health": self.health, "targets": service_targets(self.services),
+                    "media": media_series(samples), "health": self.health, "targets": service_targets(self.services),
                     "gateway_address": self.gateway, "gateway_addresses": addresses,
                     "gateway_changed": len(addresses) > 1, "internet_host": self.internet_host,
-                    "dns_server": self.dns_server, "route": self.route, "proxy": self.proxy, "nearby": self.nearby}
+                    "dns_server": self.dns_server, "route": self.route, "proxy": self.proxy, "nearby": self.nearby,
+                    "m365_endpoints": self.m365_endpoints, **change_data}
 
     def report(self):
         """The session report (works while running too: the window so far)."""
@@ -1001,7 +1118,7 @@ def wifi_text(wifi, connection=None):
 def report_markdown(report):
     """Markdown summary of a quick-test or session report (public IPs, MAC addresses/BSSIDs and the
     computer name masked like the AI package; SSIDs stay readable)."""
-    from network.report_html import mask_private
+    from network.report_html import m365_list_text, mask_private
     r = mask_private(report)
     snap = r.get("snapshot") or {}
     verdict = r.get("verdict") or {}
@@ -1018,12 +1135,28 @@ def report_markdown(report):
     lines += [f"- Connection: {connection}" + (" through a VPN" if route.get("is_vpn") else ""),
               f"- Wi-Fi: {wifi_text(snap.get('wifi'))}" if snap.get("connection") == "wifi" else None,
               f"- Verdict: **{verdict.get('headline', '?')}**: {verdict.get('text', '')}", ""]
+    listing = m365_list_text(snap.get("m365_endpoints"))
+    if listing:
+        lines.insert(len(lines) - 1, f"- Microsoft 365 address list: {listing}")
     lines = [line for line in lines if line is not None]
+    ids = {f.get("id") for f in r.get("findings") or []}
+    silent = "gateway_silent" in ids
+    addresses = [str(a) for a in snap.get("gateway_addresses") or []]
+    changed = "gateway_changed" in ids or bool(snap.get("gateway_changed")) or len(addresses) > 1
+    router_row = _series_row("Router", snap.get("gateway"))
+    if silent and (snap.get("gateway") or {}).get("sent"):
+        router_row = router_row.replace("| Router |", "| Router (does not answer ping) |", 1)
     lines += ["## Measurements", "", "| Target | Address | Loss | Avg | Jitter | p95 | Est. MOS |",
-              "|---|---|---|---|---|---|---|",
-              _series_row("Router", snap.get("gateway")), _series_row("Internet", snap.get("internet"))]
+              "|---|---|---|---|---|---|---|", router_row, _series_row("Internet", snap.get("internet"))]
     for sid, series in (snap.get("media") or {}).items():
         lines.append(_series_row(f"{oq.SERVICE_LABELS.get(sid, sid)} media relay (STUN)", series))
+    if silent:
+        lines += ["", "Router note: the router does not answer ping (normal for many routers); the path beyond it is "
+                      "fine, so this is information, not a problem."]
+    if changed:
+        lines += ["", "Gateway note: the default gateway changed during the recording"
+                  + (f" ({' -> '.join(addresses)})" if len(addresses) > 1 else "")
+                  + "; the router row covers the current gateway only."]
     dns = snap.get("dns")
     if dns:
         lines += ["", f"DNS: lookup of {dns.get('host')} " + ("OK" if dns.get("ok") else "FAILED")

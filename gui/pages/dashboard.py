@@ -427,28 +427,30 @@ class DashboardPage(Page):
             self.recent_rows.addWidget(row)
             return
         for entry in entries:
+            entry_kind = str(entry.get('kind') or 'Unknown')
             row = QFrame()
             row.setProperty("row", "true")
             row.setFixedHeight(34)
             layout = QHBoxLayout(row)
             layout.setContentsMargins(16, 0, 16, 0)
             layout.setSpacing(10)
-            kind = Label(KIND_TITLES.get(entry['kind'], entry['kind']), 12.5, color=Colors.TEXT_STRONG)
+            kind = Label(KIND_TITLES.get(entry_kind, entry_kind), 12.5, color=Colors.TEXT_STRONG)
             kind.setFixedWidth(130)
-            target = Label(entry['target'], 12, color=Colors.TEXT, mono=True)
+            target = Label(str(entry.get('target') or ''), 12, color=Colors.TEXT, mono=True)
             target.setFixedWidth(220)
-            summary = Label(entry['summary'], 12, color=Colors.TEXT_MUTED, mono=True)
-            when = Label(relative_time(entry['time']), 12, color=Colors.TEXT_MUTED)
+            summary = Label(str(entry.get('summary') or ''), 12, color=Colors.TEXT_MUTED, mono=True)
+            when = Label(relative_time(entry['time']) if entry.get('time') else '', 12, color=Colors.TEXT_MUTED)
             when.setFixedWidth(90)
-            open_link = link_button("Open")
-            page = {'diagnose': 'diagnose', 'port': 'port', 'speed': 'speed', 'iperf': 'iperf',
-                    'monitor': 'health'}[entry['kind']]
-            open_link.clicked.connect(lambda _=False, p=page, e=entry['id']: self.navigate.emit(p, {'open': e}))
             layout.addWidget(kind)
             layout.addWidget(target)
             layout.addWidget(summary, 1)
             layout.addWidget(when)
-            layout.addWidget(open_link)
+            page = {'diagnose': 'diagnose', 'port': 'port', 'speed': 'speed', 'iperf': 'iperf',
+                    'monitor': 'health'}.get(entry_kind)
+            if page and entry.get('id'):
+                open_link = link_button("Open")
+                open_link.clicked.connect(lambda _=False, p=page, e=entry['id']: self.navigate.emit(p, {'open': e}))
+                layout.addWidget(open_link)
             self.recent_rows.addWidget(row)
 
     # ------------------------------------------------------------ actions

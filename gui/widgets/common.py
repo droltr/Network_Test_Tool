@@ -93,8 +93,9 @@ def fmt_ms(value, digits=1):
 # ---------------------------------------------------------------- text
 
 class Label(QLabel):
-    def __init__(self, text="", px=12.5, weight=400, color=Colors.TEXT, mono=False, parent=None):
+    def __init__(self, text="", px=12.5, weight=400, color=None, mono=False, parent=None):
         super().__init__(text, parent)
+        color = color or Colors.TEXT
         self.setFont(mono_font(px, weight) if mono else ui_font(px, weight))
         self.set_color(color)
 
@@ -102,7 +103,8 @@ class Label(QLabel):
         self.setStyleSheet(f"color: {color}; background: transparent;")
 
 
-def section_label(text, color=Colors.TEXT_MUTED, px=10.5):
+def section_label(text, color=None, px=10.5):
+    color = color or Colors.TEXT_MUTED
     label = QLabel(text.upper())
     label.setFont(section_font(px))
     label.setStyleSheet(f"color: {color}; background: transparent;")
@@ -195,9 +197,9 @@ class LineInput(QLineEdit):
 class StatusDot(QWidget):
     """Small round indicator. style: filled, hollow, dashed, ring."""
 
-    def __init__(self, color=Colors.GREEN, size=8, style="filled", parent=None):
+    def __init__(self, color=None, size=8, style="filled", parent=None):
         super().__init__(parent)
-        self._color = color
+        self._color = color or Colors.GREEN
         self._style = style
         self._size = size
         self.setFixedSize(size + 4, size + 4)
@@ -265,8 +267,8 @@ class Pulse:
 
 
 class PulseDot(StatusDot):
-    def __init__(self, color=Colors.BLUE, size=7, style="filled", parent=None):
-        super().__init__(color, size, style, parent)
+    def __init__(self, color=None, size=7, style="filled", parent=None):
+        super().__init__(color or Colors.BLUE, size, style, parent)
         self.pulse = Pulse(self)
 
     def setVisible(self, visible):
@@ -317,10 +319,10 @@ class PulseClock:
 class Badge(QLabel):
     """Tinted pill: 11.5px/600, padding 3px 8px."""
 
-    def __init__(self, text, color=Colors.BLUE, filled=False, parent=None):
+    def __init__(self, text, color=None, filled=False, parent=None):
         super().__init__(text, parent)
         self.setFont(ui_font(11, 600))
-        self.set_tone(color, filled)
+        self.set_tone(color or Colors.BLUE, filled)
 
     def set_tone(self, color, filled=False, text_color=None):
         if filled:
@@ -362,7 +364,8 @@ class StatStrip(QFrame):
         else:
             self.setStyleSheet("")
 
-    def set(self, key, text, color=Colors.TEXT_STRONG):
+    def set(self, key, text, color=None):
+        color = color or Colors.TEXT_STRONG
         label = self.values[key]
         if text in (None, "", "—"):
             label.setText("—")

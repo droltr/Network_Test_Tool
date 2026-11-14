@@ -6,6 +6,7 @@ saves the report. Callbacks from the backend arrive on worker threads and reach 
 through Qt signals.
 """
 import html
+import logging
 import os
 import threading
 import time
@@ -23,6 +24,7 @@ from gui.widgets.common import (Card, Label, LineInput, StatusDot, PulseDot, Bad
                                 section_label, button, hbox, make_table, set_prop,
                                 fmt_ms)
 from network import office_quality
+from network.report_html import m365_list_text
 from network.office_quality import LAYER_LABELS, SERVICE_LABELS, mos_label, series_mos
 
 try:
@@ -212,7 +214,7 @@ class SaveOnExitThread(QThread):
                 os.makedirs(self.folder, exist_ok=True)
                 self.backend.write_report_files(report, self.folder)
         except Exception:
-            pass
+            logging.exception("Could not save the Office apps recording on exit")
 
 
 def chart_values(sample):
@@ -550,8 +552,8 @@ class OfficePage(Page):
     def build_quick_card(self):
         card = Card(margins=(16, 14, 16, 14), spacing=8)
         card.body.addWidget(section_label("Quick check"))
-        text = Label("About 10 seconds. Measures the Wi-Fi, router and internet, and tests every Microsoft 365, "
-                     "Teams and Zoom address once.", 12, color=Colors.TEXT_MUTED)
+        text = Label("About 10 to 30 seconds (longer when the router does not answer ping). Measures the Wi-Fi, "
+                     "router and internet, and tests every Microsoft 365, Teams and Zoom address once.", 12, color=Colors.TEXT_MUTED)
         text.setWordWrap(True)
         card.body.addWidget(text)
         self.quick_btn = button("Run quick check", "primary", 34, width=170)
@@ -1054,15 +1056,36 @@ class OfficePage(Page):
         card = self.card("local", "Local network")
         card.set_note("")
         gateway = snapshot.get("gateway")
+        gateway_info = ("gateway_silent", "gateway_changed")
         related = [f["severity"] for f in findings if f.get("id") == "gateway_loss" or
-                   (f.get("layer") == "local" and f.get("id") not in ("dns",))]
+                   (f.get("layer") == "local" and f.get("id") not in ("dns",) + gateway_info)]
+        silent = any(f.get("id") == "gateway_silent" for f in findings)
+        changed = any(f.get("id") == "gateway_changed" for f in findings)
+        addresses = snapshot.get("gateway_addresses") or []
+        change_note = ("The default gateway changed during the recording (" + " -> ".join(addresses) + "). "
+                       "These figures cover the current gateway only.") if changed else ""
         if not gateway or not gateway.get("sent"):
             card.set_status(worst(related), None if related else "Not measured")
             card.set_rows([])
-            card.set_note("The router (default gateway) was not measured.")
+            card.set_note(" ".join(t for t in ("The router (default gateway) was not measured.", change_note) if t))
+            return card
+        rows = self.series_rows(gateway)
+        if changed and addresses:
+            rows.append(("Gateways seen", " -> ".join(addresses), None))
+        if silent:
+            # The router ignores ping while traffic beyond it gets through: information, not a failure.
+            loss = gateway.get("loss_pct")
+            rows[0] = ("Ping replies", f"{fmt_pct(100 - loss) if loss is not None else '—'}  "
+                       f"({gateway.get('sent', 0) - gateway.get('lost', 0)}/{gateway.get('sent', 0)})", None)
+            card.set_status("info", "No ping reply")
+            card.set_rows(rows)
+            card.set_note(" ".join(t for t in (
+                "The router does not answer ping. This is normal for many routers; the path beyond it is fine.",
+                change_note) if t))
             return card
         card.set_status(worst(related) or "ok")
-        card.set_rows(self.series_rows(gateway))
+        card.set_rows(rows)
+        card.set_note(change_note)
         return card
 
     def internet_card(self, snapshot, findings):
@@ -1113,6 +1136,8 @@ class OfficePage(Page):
             name = check.get("name") or check.get("check_id") or kind
             target = f"{check.get('host')}" + (f":{check['port']}" if check.get("port") else "")
             tooltip = f"{kind} {target}" + (f"\n{check['error']}" if check.get("error") else "")
+            if check.get("category") and check.get("category_source") == "m365":
+                tooltip += f"\nMicrosoft category: {check['category']} (Microsoft's current address list)"
             if check.get("ok") is None:
                 rows.append((f"{name}", "untested", Colors.TEXT_FAINT, tooltip))
             elif check.get("ok"):
@@ -1140,6 +1165,9 @@ class OfficePage(Page):
             card.set_note("No checks ran for this service." if not own else "The checks did not run.")
         else:
             card.set_status(worst(severities) or "ok")
+            listing = m365_list_text(snapshot.get("m365_endpoints"))
+            if sid == "m365" and listing:
+                card.set_note(f"Microsoft 365 address list: {listing}")
         return card
 
     # ---------------------------------------------------------------- findings and correlations
@@ -1331,4 +1359,5 @@ class OfficePage(Page):
             save_thread.start()
         deadline = time.monotonic() + CLEANUP_WAIT_MS / 1000.0   # one shared budget for all waits
         for thread in (self.quick_thread, self.stop_thread, self.connection_thread, save_thread):
-            finish_thread(thread, max(0, int((deadline - time.monotonic()) * 1000)))
+            if not finish_thread(thread, max(0, int((deadline - time.monotonic()) * 1000))):
+                logging.error("Office apps shutdown exceeded its wait budget; a worker is still running")

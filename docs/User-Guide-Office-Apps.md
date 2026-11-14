@@ -20,7 +20,7 @@ Under the field the page shows the connection: `Connection: Wi-Fi · Wi-Fi is ch
 
 ## Quick check
 
-About 10 seconds. **Run quick check** measures:
+About 10 to 30 seconds (longer when the router does not answer ping). **Run quick check** measures:
 
 - the Wi-Fi link (signal, band, channel, link rate, how crowded the channel is);
 - 20 pings, one every 0.5 seconds, to your router and to the internet (1.1.1.1, or 8.8.8.8
@@ -97,6 +97,8 @@ Until then roaming and channel congestion cannot be checked.
 
 ## VPN and proxy detection
 
+The page downloads Microsoft's public address list at most once a day to know which Microsoft 365 addresses need a direct route. If that is not possible it uses the last saved copy or the list built into the app, and the report says which one it used.
+
 For the Microsoft addresses Microsoft calls "Optimize" (Exchange, SharePoint, the Teams media
 relay), the page asks the system which network adapter would carry the traffic and whether it
 looks like a VPN tunnel. It also reads the proxy settings and notes whether the HTTPS checks
@@ -142,6 +144,22 @@ When relay probes were sent, the service card gets these extra rows: **Call rela
 relay jitter**, **Call relay loss** and **Call quality (estimate)** with the label and the MOS
 value. If the relay did not answer, the row **Call relay** shows "no answer".
 
+### A router that does not answer ping
+
+Many routers ignore ping. When the router does not answer but the path beyond it is fine, this is
+information, not a problem. The Router card shows **No ping reply** with the note "The router does
+not answer ping. This is normal for many routers; the path beyond it is fine.", and the finding is
+labelled **information**. The HTML report marks the router as "does not answer ping", and the
+Markdown report adds a router note. The verdict does not blame the router or Wi-Fi for it.
+
+### The default gateway changes during a recording
+
+If the default gateway changes while a recording runs (for example when a VPN connects or the
+computer moves to another access point), the Router card shows **Gateways seen** with the
+addresses in order (for example `A -> B`) and a note. The HTML report adds a **Default gateway**
+fact with the addresses, and the Markdown report adds a **Gateway note**. The router figures cover
+the current gateway only; replies from the earlier one are not included.
+
 ## Reports, logs and copying
 
 - **Open report** saves three files with the same name, `office-quick-<date>-<time>` or
@@ -176,8 +194,9 @@ value. If the relay did not answer, the row **Call relay** shows "no answer".
 - **Only the Teams media relay is probed for calls.** Real calls may use other relays and ports;
   the probes show the path at the time of the test only.
 - **Your own SharePoint and OneDrive are tested only** when you enter an organization domain.
-- **Loss to a router that ignores pings** (some do) can look like a local problem. Findings
-  with too few probes (under 10) are not drawn from them.
+- **A router that ignores pings** (some do) is shown as information when the path beyond it is
+  fine (see above). A router that answers only some pings can still show loss that is not real.
+  Findings with too few probes (under 10) are not drawn from them.
 - **Wi-Fi on Linux and macOS** was tested against sample output only, not against real
   adapters. Treat it as best effort and compare with `nmcli dev wifi`, `iw dev <if> link` or
   the Wi-Fi menu.

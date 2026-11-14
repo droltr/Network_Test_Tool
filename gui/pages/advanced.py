@@ -9,10 +9,8 @@ from gui.widgets.common import (Card, Label, LineInput, LogPane, StatusDot, Badg
                                 make_table, cell_widget)
 from network.advanced import AdvancedDiagnostics
 
-STATUS_COLORS = {
-    'ESTABLISHED': Colors.GREEN,
-    'LISTEN': Colors.BLUE,
-}
+def status_colors():
+    return {'ESTABLISHED': Colors.GREEN, 'LISTEN': Colors.BLUE}
 
 
 class Worker(QThread):
@@ -187,7 +185,7 @@ class AdvancedPage(Page):
             table.setItem(i, 3, text_item(c['local'], mono_font(12), Colors.TEXT))
             table.setItem(i, 4, text_item(c['remote'], mono_font(12), Colors.TEXT))
             status = c['status'] if c['status'] not in ('NONE', '') else "—"
-            color = STATUS_COLORS.get(status, Colors.YELLOW if status.endswith('WAIT') else Colors.TEXT_MUTED)
+            color = status_colors().get(status, Colors.YELLOW if status.endswith('WAIT') else Colors.TEXT_MUTED)
             table.setItem(i, 5, text_item(status, ui_font(11, 600), color))
         self.apply_conn_filter()
 

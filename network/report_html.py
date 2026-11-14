@@ -754,7 +754,8 @@ h3 { font: 600 15.5px/1.3 var(--display); margin: 8px 0 0; color: var(--muted); 
 """
 
 _SEVERITY_TONE = {"fail": "bad", "warn": "warn", "info": "neutral", "ok": "ok"}
-_SEVERITY_TEXT = {"fail": "problem", "warn": "warning", "info": "note", "ok": "ok"}
+_SEVERITY_TEXT = {"fail": "problem", "warn": "warning", "info": "information", "ok": "ok"}
+SILENT_ROUTER_TEXT = "does not answer ping (normal for many routers); the path beyond it is fine"
 _EVENT_TONE = {"outage": "bad", "service_failed": "bad", "dns_failed": "bad", "disconnect": "bad",
                "signal_weak": "warn", "signal_drop": "warn", "rate_drop": "warn", "roam": "warn",
                "band_change": "warn", "ssid_change": "warn", "gateway_change": "warn",
@@ -770,6 +771,16 @@ def _series_fact(series):
     if series.get("jitter_ms") is not None:
         text += f" · {ms(series.get('jitter_ms'))} jitter"
     return text
+
+
+def _gateway_notes(report):
+    """(silent, addresses): the router answers no ping (finding gateway_silent) and the default gateways
+    seen during the recording when it changed (empty list when it did not)."""
+    ids = {f.get("id") for f in report.get("findings") or []}
+    snap = report.get("snapshot") or {}
+    addresses = [str(a) for a in snap.get("gateway_addresses") or []]
+    changed = "gateway_changed" in ids or snap.get("gateway_changed") or len(addresses) > 1
+    return "gateway_silent" in ids, (addresses if changed else [])
 
 
 def _finding_card(f):
@@ -799,6 +810,21 @@ def _office_findings(findings):
     return Raw(f"<div class=\"findings\">{''.join(parts)}</div>")
 
 
+def m365_list_text(info):
+    """Short text on where the Microsoft 365 address list of an Office report came from, e.g.
+    'downloaded 2026-11-14', 'cached copy from 2026-11-13' or 'bundled copy (download failed: timed out)';
+    None when the report has no such information."""
+    if not isinstance(info, dict) or not info.get("source"):
+        return None
+    day = str(info.get("fetched") or "")[:10]
+    error = f" (download failed: {info['error']})" if info.get("error") else ""
+    if info["source"] == "web":
+        return "downloaded" + (f" {day}" if day else "")
+    if info["source"] == "cache":
+        return "cached copy" + (f" from {day}" if day else "") + error
+    return "bundled copy" + error
+
+
 def _office_facts(report, snap):
     from network.office_quality import SERVICE_LABELS, mos_label, series_mos
     route = snap.get("route") or {}
@@ -824,7 +850,14 @@ def _office_facts(report, snap):
         if congestion.get("level") and snap.get("nearby"):
             facts.append(("Channel congestion", f"{congestion['level']} ({congestion.get('same_channel', 0)} on the "
                                                 f"same channel)"))
-    facts.append(("Router", _series_fact(snap.get("gateway"))))
+    silent, gateways = _gateway_notes(report)
+    router = _series_fact(snap.get("gateway"))
+    if silent and (snap.get("gateway") or {}).get("sent"):
+        router = f"{router.split(' · ')[0]}, {SILENT_ROUTER_TEXT}"
+    facts.append(("Router", router))
+    if gateways:
+        facts.append(("Default gateway", "changed during the recording: " + " -> ".join(gateways)
+                      if len(gateways) > 1 else "changed during the recording"))
     facts.append(("Internet", _series_fact(snap.get("internet"))))
     dns = snap.get("dns")
     if dns:
@@ -841,6 +874,9 @@ def _office_facts(report, snap):
     proxy = snap.get("proxy")
     if proxy is not None:
         facts.append(("Proxy", "configured" if proxy.get("configured") else "none"))
+    listing = m365_list_text(snap.get("m365_endpoints"))
+    if listing:
+        facts.append(("Microsoft 365 address list", listing))
     if report.get("kind") == "session":
         duration = report.get("duration_s") or 0
         facts.append(("Recorded", f"{duration // 60} min {duration % 60} s · {len(report.get('samples') or [])} rounds"))
@@ -848,7 +884,7 @@ def _office_facts(report, snap):
     return fact_cards(facts)
 
 
-def _office_measurements(snap):
+def _office_measurements(snap, silent=False):
     from network.office_quality import SERVICE_LABELS, mos_label, series_mos
     rows, muted = [], []
     entries = [("Router", snap.get("gateway"), False), ("Internet", snap.get("internet"), False)]
@@ -861,7 +897,9 @@ def _office_measurements(snap):
             continue
         mos = series_mos(series) if is_media else None
         rows.append([name, Raw(f"<span class=\"mono\">{esc(series.get('address') or '—')}</span>"),
-                     loss_pill(series.get("lost", 0), series.get("sent", 0)), ms(series.get("avg_ms")),
+                     (pill(f"{series.get('lost', 0)}/{series.get('sent', 0)} (no ping reply)", "neutral")
+                      if silent and name == "Router" else loss_pill(series.get("lost", 0), series.get("sent", 0))),
+                     ms(series.get("avg_ms")),
                      ms(series.get("p95_ms")), ms(series.get("jitter_ms")),
                      f"{mos:.2f} ({mos_label(mos)})" if mos is not None else "—"])
     return table(["Target", "Address", "Loss", "Avg", "p95", "Jitter", "Est. MOS"], rows, numeric=(2, 3, 4, 5),
@@ -899,16 +937,24 @@ def _office_checks(checks):
 def _office_knowledge(report, snap):
     from network.office_quality import SERVICE_LABELS
     items = []
+    silent, gateways = _gateway_notes(report)
     for name, key in (("Router", "gateway"), ("Internet", "internet")):
         series = snap.get(key)
-        if series and series.get("sent"):
+        if silent and key == "gateway" and series and series.get("sent"):
+            items.append((True, f"Router ({series.get('address') or '?'}): {series.get('lost', 0)} of "
+                                f"{series.get('sent')} pings lost; the router {SILENT_ROUTER_TEXT}."))
+        elif series and series.get("sent"):
             items.append((True, f"{name} ({series.get('address') or '?'}): {series.get('lost', 0)} of "
                                 f"{series.get('sent')} pings lost ({series.get('loss_pct', 0):.1f}%)."))
         else:
             items.append((False, f"{name}: not measured."))
+    if gateways:
+        items.append((True, "The default gateway changed during the recording"
+                            + (f" ({' -> '.join(gateways)})" if len(gateways) > 1 else "")
+                            + "; the router figures cover the current gateway only."))
     for sid, series in (snap.get("media") or {}).items():
         if series.get("sent"):
-            items.append((True, f"{SERVICE_LABELS.get(sid, sid)} media relay: {series.get('lost', 0)} of "
+            items.append((True, f"{SERVICE_LABELS.get(sid, sid)} media relay:{series.get('lost', 0)} of "
                                 f"{series.get('sent')} STUN probes on UDP {series.get('port') or 3478} lost."))
     checks = snap.get("services") or []
     tested = [c for c in checks if c.get("ok") is not None]
@@ -1025,7 +1071,7 @@ def render_office_report(report, files=None):
                               steps(correlations) if correlations else note("No loss bursts were recorded."),
                               note="A loss burst is linked to a Wi-Fi event or a weak signal within 5 seconds of it."))
     blocks.append(section("Findings", _office_findings(findings)))
-    blocks.append(section("Measurements", _office_measurements(snap),
+    blocks.append(section("Measurements", _office_measurements(snap, _gateway_notes(report)[0]),
                           note="Router and internet: ICMP echo. Media relays: STUN Binding Requests over UDP, the "
                                "way Teams checks its media path. Est. MOS is a 1-4.5 call-quality estimate."))
     if session and report.get("outages"):
