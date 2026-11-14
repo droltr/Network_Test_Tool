@@ -1,0 +1,27 @@
+# Security Policy
+
+## Reporting a Vulnerability
+
+We take the security of our software seriously. If you believe you have found a security vulnerability in the Network Test Tool, please report it to us as described below.
+
+**Please do not report security vulnerabilities through public GitHub issues.**
+
+Instead, use GitHub's private vulnerability reporting: open the **Security** tab of [droltr/Network_Test_Tool](https://github.com/droltr/Network_Test_Tool/security) and choose **Report a vulnerability**. Only the maintainer can see the report.
+
+Please include the following details in your report:
+
+*   Type of issue (e.g. buffer overflow, SQL injection, cross-site scripting, etc.)
+*   Full paths of source file(s) related to the manifestation of the issue
+*   The location of the affected source code (tag/branch/commit or direct URL)
+*   Any special configuration required to reproduce the issue
+*   Step-by-step instructions to reproduce the issue
+*   Proof-of-concept or exploit code (if possible)
+*   Impact of the issue, including how an attacker might exploit the issue
+
+We prefer all communications to be in English.
+
+## Policy
+
+*   We will investigate and respond to all valid reports.
+*   We will do our best to patch vulnerabilities within 90 days.
+*   We will acknowledge your report in our security advisories (if you wish).

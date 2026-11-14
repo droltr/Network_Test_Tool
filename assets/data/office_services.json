@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "_comment": "Service reachability checks for the Office apps feature (network/office_services.py). Adding a service needs only a new entry in 'services'. Hosts may contain {tenant}; such checks are skipped when no tenant is given. 'optimize' marks traffic Microsoft puts in the Optimize category (must bypass proxy/VPN). 'verified': false means no public target could be confirmed to answer this probe; the check is reported as untested instead of failed. Each check cites its source in 'source'.",
+  "sources": [
+    "https://learn.microsoft.com/en-us/microsoft-365/enterprise/urls-and-ip-address-ranges",
+    "https://learn.microsoft.com/en-us/microsoft-365/enterprise/microsoft-365-ip-web-service",
+    "https://learn.microsoft.com/en-us/microsoftteams/prepare-network",
+    "https://learn.microsoft.com/en-us/training/modules/plan-optimize-network-performance-for-teams-phone-system/2-understand-teams-network-requirements",
+    "https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0060548",
+    "https://assets.zoom.us/docs/ipranges/ZoomMeetings.txt"
+  ],
+  "services": [
+    {
+      "id": "m365",
+      "name": "Microsoft 365 (Outlook, SharePoint, OneDrive, sign-in)",
+      "checks": [
+        {"id": "login-dns", "name": "Sign-in name lookup", "kind": "dns",
+         "host": "login.microsoftonline.com", "port": 443, "optimize": false, "verified": true,
+         "source": "urls-and-ip-address-ranges: endpoint set 56 (Allow, Required), TCP 443"},
+        {"id": "login-https", "name": "Sign-in service (Entra ID)", "kind": "https",
+         "host": "login.microsoftonline.com", "port": 443, "path": "/common/v2.0/.well-known/openid-configuration",
+         "optimize": false, "verified": true,
+         "source": "urls-and-ip-address-ranges: endpoint set 56 (Allow, Required); public OpenID metadata, no credentials"},
+        {"id": "exchange-tls", "name": "Exchange Online (Outlook) secure connection", "kind": "tls",
+         "host": "outlook.office365.com", "port": 443, "optimize": true, "verified": true,
+         "source": "urls-and-ip-address-ranges: endpoint set 1 (Optimize, Required), TCP 443/80, UDP 443"},
+        {"id": "exchange-https", "name": "Exchange Online (Outlook) web", "kind": "https",
+         "host": "outlook.office365.com", "port": 443, "path": "/", "optimize": true, "verified": true,
+         "source": "urls-and-ip-address-ranges: endpoint set 1 (Optimize, Required)"},
+        {"id": "sharepoint-tls", "name": "SharePoint Online front door", "kind": "tls",
+         "host": "microsoft.sharepoint.com", "port": 443, "optimize": true, "verified": true,
+         "source": "urls-and-ip-address-ranges: endpoint set 31 *.sharepoint.com (Optimize, Required); TLS handshake only, no HTTP request"},
+        {"id": "sharepoint-tenant-tls", "name": "Your SharePoint site", "kind": "tls",
+         "host": "{tenant}.sharepoint.com", "port": 443, "optimize": true, "verified": true,
+         "source": "urls-and-ip-address-ranges: endpoint set 31 *.sharepoint.com (Optimize, Required)"},
+        {"id": "onedrive-tenant-tls", "name": "Your OneDrive", "kind": "tls",
+         "host": "{tenant}-my.sharepoint.com", "port": 443, "optimize": true, "verified": true,
+         "source": "urls-and-ip-address-ranges: endpoint set 31 *.sharepoint.com (Optimize, Required)"},
+        {"id": "onedrive-client-https", "name": "OneDrive sync client service", "kind": "https",
+         "host": "oneclient.sfx.ms", "port": 443, "path": "/", "optimize": false, "verified": true,
+         "source": "urls-and-ip-address-ranges: endpoint set 36 (Default, Required), TCP 443/80"},
+        {"id": "office-https", "name": "Microsoft 365 portal", "kind": "https",
+         "host": "www.microsoft365.com", "port": 443, "path": "/", "optimize": false, "verified": true,
+         "source": "urls-and-ip-address-ranges: endpoint set 147 (Default, Required), TCP 443/80"}
+      ]
+    },
+    {
+      "id": "teams",
+      "name": "Microsoft Teams",
+      "targets": {"rtt_ms": 100, "jitter_ms": 30, "loss_pct": 1},
+      "targets_source": "Client to Microsoft network edge: RTT < 100 ms, packet loss < 1% during any 15 s, inter-arrival jitter < 30 ms during any 15 s (https://learn.microsoft.com/en-us/training/modules/plan-optimize-network-performance-for-teams-phone-system/2-understand-teams-network-requirements)",
+      "checks": [
+        {"id": "teams-dns", "name": "Teams name lookup", "kind": "dns",
+         "host": "teams.microsoft.com", "port": 443, "optimize": false, "verified": true,
+         "source": "urls-and-ip-address-ranges: endpoint set 12 (Allow, Required)"},
+        {"id": "teams-https", "name": "Teams service", "kind": "https",
+         "host": "teams.microsoft.com", "port": 443, "path": "/", "optimize": false, "verified": true,
+         "source": "urls-and-ip-address-ranges: endpoint set 12 (Allow, Required), TCP 443/80, UDP 443"},
+        {"id": "teams-cloud-tls", "name": "Teams (cloud.microsoft) secure connection", "kind": "tls",
+         "host": "teams.cloud.microsoft", "port": 443, "optimize": false, "verified": true,
+         "source": "urls-and-ip-address-ranges: endpoint set 12 (Allow, Required)"},
+        {"id": "teams-media-stun", "name": "Teams media relay (UDP 3478)", "kind": "stun",
+         "host": "worldaz.tr.teams.microsoft.com", "port": 3478, "optimize": true, "verified": true,
+         "source": "urls-and-ip-address-ranges: endpoint set 11 (Optimize, Required) 52.112.0.0/14, 52.122.0.0/15, UDP 3478-3481. The host is under *.teams.microsoft.com, resolves into 52.112.0.0/14 and answered a STUN Binding Request when probed; the host name itself is not listed on the page."},
+        {"id": "teams-media-tcp", "name": "Teams media relay TCP fallback (443)", "kind": "tcp",
+         "host": "worldaz.tr.teams.microsoft.com", "port": 443, "optimize": false, "verified": true,
+         "source": "urls-and-ip-address-ranges: endpoint set 12 covers 52.112.0.0/14 on TCP 443 (Teams falls back to TCP when UDP is blocked)"}
+      ]
+    },
+    {
+      "id": "zoom",
+      "name": "Zoom",
+      "checks": [
+        {"id": "zoom-dns", "name": "Zoom name lookup", "kind": "dns",
+         "host": "zoom.us", "port": 443, "optimize": false, "verified": true,
+         "source": "Zoom firewall rules: allow zoom.us and *.zoom.us"},
+        {"id": "zoom-https", "name": "Zoom web service", "kind": "https",
+         "host": "zoom.us", "port": 443, "path": "/", "optimize": false, "verified": true,
+         "source": "Zoom firewall rules: TCP 443 to *.zoom.us"},
+        {"id": "zoom-tls", "name": "Zoom secure connection", "kind": "tls",
+         "host": "zoom.us", "port": 443, "optimize": false, "verified": true,
+         "source": "Zoom firewall rules: TCP 443 to *.zoom.us"},
+        {"id": "zoom-tcp-8801", "name": "Zoom meeting port TCP 8801", "kind": "tcp",
+         "host": "zoom.us", "port": 8801, "optimize": false, "verified": false,
+         "source": "Zoom firewall rules: TCP 443, 8801, 8802. Not verifiable: zoom.us accepts TCP connections on any port (22, 8801 and 8899 all connected when probed), so a connect proves nothing about meeting servers."},
+        {"id": "zoom-udp-8801", "name": "Zoom media UDP 8801", "kind": "udp",
+         "host": "zoom.us", "port": 8801, "optimize": false, "verified": false,
+         "source": "Zoom firewall rules: UDP 3478, 3479, 8801-8810. No public Zoom host answered a STUN Binding Request on UDP 3478 or 8801 when probed."}
+      ]
+    }
+  ],
+  "m365_fallback": {
+    "_comment": "Optimize endpoint sets copied from https://learn.microsoft.com/en-us/microsoft-365/enterprise/urls-and-ip-address-ranges (last updated 10/30/2026); used only when the web service and the cache are both unavailable.",
+    "endpoint_sets": [
+      {"id": 1, "serviceArea": "Exchange", "category": "Optimize", "required": true,
+       "urls": ["outlook.cloud.microsoft", "outlook.office.com", "outlook.office365.com"],
+       "ips": ["13.107.6.152/31", "13.107.18.10/31", "13.107.128.0/22", "23.103.160.0/20", "40.96.0.0/13",
+               "40.104.0.0/15", "52.96.0.0/14", "131.253.33.215/32", "132.245.0.0/16", "150.171.32.0/22",
+               "204.79.197.215/32"],
+       "tcpPorts": "80,443", "udpPorts": "443"},
+      {"id": 11, "serviceArea": "Skype", "category": "Optimize", "required": true,
+       "ips": ["52.112.0.0/14", "52.122.0.0/15", "2603:1063::/38"],
+       "udpPorts": "3478,3479,3480,3481"},
+      {"id": 31, "serviceArea": "SharePoint", "category": "Optimize", "required": true,
+       "urls": ["*.sharepoint.com"],
+       "ips": ["13.107.136.0/22", "40.108.128.0/17", "52.104.0.0/14", "104.146.128.0/17", "150.171.40.0/22"],
+       "tcpPorts": "80,443", "udpPorts": "443"}
+    ]
+  }
+}

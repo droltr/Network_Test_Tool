@@ -1,0 +1,54 @@
+name: Deploy launcher site
+
+# Publishes only the site/ folder (run.ps1, run.sh, index.html) to GitHub Pages:
+# https://droltr.github.io/Network_Test_Tool/
+# Requires Settings > Pages > Source = "GitHub Actions".
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check launcher scripts
+        run: |
+          # irm | iex in Windows PowerShell 5.1 decodes the script without a charset,
+          # so the scripts must be plain ASCII without a byte order mark.
+          if LC_ALL=C grep -n '[^ -~	]' site/run.ps1 site/run.sh; then
+            echo "Non-ASCII characters found in the launcher scripts." >&2
+            exit 1
+          fi
+          sh -n site/run.sh
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

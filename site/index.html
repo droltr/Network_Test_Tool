@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Network Test Tool</title>
+<meta name="description" content="Run Network Test Tool without installing it.">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1f2328;
+    --muted: #59636e;
+    --code-bg: #f6f8fa;
+    --border: #d1d9e0;
+    --link: #0969da;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --fg: #e6edf3;
+      --muted: #9198a1;
+      --code-bg: #161b22;
+      --border: #3d444d;
+      --link: #4493f8;
+    }
+  }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 40px 16px 64px; }
+  h1 { margin: 0 0 4px; font-size: 1.9rem; }
+  h2 { margin: 32px 0 8px; font-size: 1.15rem; }
+  p { margin: 8px 0; }
+  .muted { color: var(--muted); }
+  a { color: var(--link); }
+  pre {
+    margin: 8px 0;
+    padding: 12px 14px;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow-x: auto;
+    font: 14px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+  }
+  code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+  ul { padding-left: 20px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Network Test Tool</h1>
+  <p class="muted">Network diagnostics for Windows, Linux and macOS. Run it without installing.</p>
+
+  <h2>Windows (PowerShell)</h2>
+  <pre><code>irm https://droltr.github.io/Network_Test_Tool/run.ps1 | iex</code></pre>
+
+  <h2>Linux x86_64 / macOS Apple silicon</h2>
+  <pre><code>curl -fsSL https://droltr.github.io/Network_Test_Tool/run.sh | sh</code></pre>
+
+  <h2>What the command does</h2>
+  <ul>
+    <li>Downloads the latest release from GitHub into a per-user cache
+      (<code>%LOCALAPPDATA%\NetworkTestTool\bin</code> or <code>~/.cache/network-test-tool/bin</code>).</li>
+    <li>Checks its SHA-256 against the release's <code>SHA256SUMS.txt</code> and refuses to run on a mismatch.</li>
+    <li>Starts the app. No administrator rights, no installer, no registry or PATH changes.</li>
+  </ul>
+  <p>Read the scripts before running them:
+    <a href="run.ps1">run.ps1</a> &middot; <a href="run.sh">run.sh</a>.</p>
+
+  <h2>Manual download</h2>
+  <p>If the command is blocked (for example by company security policy), download the file yourself from
+    <a href="https://github.com/droltr/Network_Test_Tool/releases/latest">GitHub Releases</a>.</p>
+  <p class="muted"><a href="https://github.com/droltr/Network_Test_Tool">Source code on GitHub</a></p>
+</main>
+</body>
+</html>
